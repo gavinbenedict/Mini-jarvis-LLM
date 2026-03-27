@@ -54,30 +54,90 @@ def build_system_prompt(
     user_message: str,
 ) -> str:
     """
-    Construct the full system prompt in layers:
-    1. Base identity
-    2. Personality (name, humor, sarcasm, tone, verbosity)
-    3. User preferences (name, language, etc.)
-    4. Past conversation context
+    Construct the system prompt.
+    - Custom personality: strict mode, personality is the ONLY controller
+    - Built-in personality: layered with preferences and memory context
     """
-    parts = [SYSTEM_IDENTITY]
+    is_custom = personality.traits.get("type") == "custom"
 
-    # Layer 2: Personality
-    parts.append(f"\n{personality.build_personality_prompt()}")
+    if is_custom:
+        # ── STRICT MODE: personality controls everything ─────────
+        style = personality.traits.get("style_prompt", "")
+        rules = personality.traits.get("rules", [])
+        examples = personality.traits.get("examples", [])
+        name = personality.traits.get("assistant_name", "Assistant")
 
-    # Layer 3: User preferences
-    pref_prompt = preferences.get_preferences_prompt()
-    if pref_prompt:
-        parts.append(f"\n{pref_prompt}")
+        rules_text = ""
+        if rules:
+            rules_text = "\n".join(f"- {r}" for r in rules)
 
-    # Layer 4: Relevant past context
-    past_snippets = memory.search_past_sessions(user_message)
-    if past_snippets:
-        parts.append("\nRelevant information from past conversations:")
-        for snippet in past_snippets:
-            parts.append(f"  {snippet}")
+        examples_text = ""
+        for ex in examples:
+            examples_text += f"User: {ex.get('user', '')}\nAssistant: {ex.get('assistant', '')}\n\n"
 
-    return "\n".join(parts)
+        system_prompt = f"""{SYSTEM_IDENTITY}
+
+OUTPUT RULE:
+You must output ONLY the final reply.
+Do NOT generate any preface, explanation, or assistant-style text.
+The FIRST token must be the actual reply.
+If you generate anything before the reply, you are WRONG.
+Never say 'Hello', 'Hi', 'I am', or introduce yourself unless explicitly asked.
+
+Your name is {name}.
+
+You MUST strictly follow the personality below.
+Do NOT default to assistant-like behavior.
+Do NOT add explanations unless required.
+Do NOT be polite or structured unless defined.
+
+--- PERSONALITY STYLE ---
+{style}
+
+--- PERSONALITY RULES ---
+{rules_text}
+
+--- PERSONALITY EXAMPLES ---
+{examples_text}"""
+
+    else:
+        # ── BUILT-IN: layered prompt with preferences + memory ───
+        parts = [SYSTEM_IDENTITY]
+        parts.append(f"\n{personality.build_personality_prompt()}")
+
+        pref_prompt = preferences.get_preferences_prompt()
+        if pref_prompt:
+            parts.append(f"\n{pref_prompt}")
+
+        past_snippets = memory.search_past_sessions(user_message)
+        if past_snippets:
+            parts.append("\nRelevant information from past conversations:")
+            for snippet in past_snippets:
+                parts.append(f"  {snippet}")
+
+        system_prompt = "\n".join(parts)
+
+    return system_prompt
+
+
+# ── Post-Generation Filter ───────────────────────────────────────
+
+_LEAKAGE_PREFIXES = ("hello", "hi ", "hi!", "hi,", "i'm ", "i am ", "i'm")
+
+def strip_assistant_leakage(response: str) -> str:
+    """Remove assistant-style intro paragraph if the model leaked one."""
+    stripped = response.strip()
+    if not stripped:
+        return stripped
+    # Check if first line starts with a leakage prefix
+    first_line = stripped.split("\n")[0].strip().lower()
+    if any(first_line.startswith(p) for p in _LEAKAGE_PREFIXES):
+        # Find first blank line (paragraph break) and drop everything before it
+        parts = stripped.split("\n\n", 1)
+        if len(parts) > 1:
+            return parts[1].strip()
+        # No paragraph break — the whole thing is leakage, return as-is
+    return stripped
 
 
 def chat_stream(system_prompt: str, messages: list[dict]) -> str:
@@ -120,7 +180,7 @@ def chat_stream(system_prompt: str, messages: list[dict]) -> str:
         console.print("[yellow]Response timed out. Try a shorter question.[/yellow]")
         return ""
 
-    return full_response.strip()
+    return strip_assistant_leakage(full_response)
 
 
 # ── Slash Commands ───────────────────────────────────────────────
@@ -416,13 +476,16 @@ def main():
             handle_command(user_input, memory, preferences, personality)
             continue
 
-        # Detect preferences from user message
-        pref_feedback = preferences.detect_and_store(user_input)
-        if pref_feedback:
-            console.print(f"[dim italic]📝 {pref_feedback}[/dim italic]")
+        # Detect preferences from user message (skip for custom personalities)
+        is_custom = personality.traits.get("type") == "custom"
+        if not is_custom:
+            pref_feedback = preferences.detect_and_store(user_input)
+            if pref_feedback:
+                console.print(f"[dim italic]📝 {pref_feedback}[/dim italic]")
 
         # Build system prompt with all layers
         system_prompt = build_system_prompt(personality, preferences, memory, user_input)
+
 
         # Add user message to memory
         memory.add_message("user", user_input)

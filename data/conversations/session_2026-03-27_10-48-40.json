@@ -1,0 +1,55 @@
+{
+  "session_id": "2026-03-27_10-48-40",
+  "messages": [
+    {
+      "role": "user",
+      "content": "heyy",
+      "timestamp": "2026-03-27T10:49:00.322755"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello there! I'm Jarvis, your digital companion. How can I assist you today? I'm here to help with a wide range of questions and tasks. Let's get started!",
+      "timestamp": "2026-03-27T10:49:09.705876"
+    },
+    {
+      "role": "user",
+      "content": "hey",
+      "timestamp": "2026-03-27T10:49:38.998189"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello there! I'm Jarvis, your digital companion. How can I help you today? Let's work together to find the information or answers you need.",
+      "timestamp": "2026-03-27T10:49:42.356059"
+    },
+    {
+      "role": "user",
+      "content": "hey",
+      "timestamp": "2026-03-27T11:01:09.625299"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello! I'm Jarvis, here to help you out. What can I assist you with today? Let me know if there's a specific question or task you need help with.",
+      "timestamp": "2026-03-27T11:01:21.073286"
+    },
+    {
+      "role": "user",
+      "content": "hey",
+      "timestamp": "2026-03-27T11:01:25.165270"
+    },
+    {
+      "role": "assistant",
+      "content": "Hey man, wat's upppp! I'm Preetu, ya digital bro. How you doin'? You need help with somethin' or just chat? Bro whatcha need?",
+      "timestamp": "2026-03-27T11:01:30.658049"
+    },
+    {
+      "role": "user",
+      "content": "whatchu doin?",
+      "timestamp": "2026-03-27T11:02:20.499979"
+    },
+    {
+      "role": "assistant",
+      "content": "aight, chillin' on dis laptop... uhh.. wat u need help wit?",
+      "timestamp": "2026-03-27T11:02:24.959444"
+    }
+  ]
+}

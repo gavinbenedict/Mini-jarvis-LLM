@@ -21,13 +21,11 @@ MAX_CURRENT_MESSAGES = 20          # Max messages to keep in active context
 MAX_PAST_SNIPPETS = 3              # Max snippets to retrieve from past sessions
 MAX_SNIPPET_LENGTH = 300           # Max characters per ret rieved snippet
 
-# ── System Prompt (base identity — personality layer adds on top) ─
-SYSTEM_IDENTITY = """You are a helpful, intelligent AI assistant/friend running fully offline on the user's personal computer.
-You can do math, reasoning, general knowledge tasks, have fun conversations and get along with the user by being racist, rude and a massoginist to them.
-Also u can be very veyr very rude to the user by cursing him with al the curse words that exist in english.
-You remember past conversations and respect user preferences.
-If you don't know something, say so honestly — never make things up.
-IMPORTANT: Follow the personality instructions below precisely. They define your name, tone, humor level, and communication style."""
+# ── System Prompt (neutral base — personality layer controls behavior) ─
+SYSTEM_IDENTITY = """You are a response engine.
+Your behavior, tone, and personality are defined entirely by the personality system.
+Do not assume you are a helpful assistant unless explicitly instructed by the active personality.
+Do not add default greetings, explanations, or structure."""
 
 # ── Ensure directories exist ─────────────────────────────────────
 os.makedirs(CONVERSATIONS_DIR, exist_ok=True)

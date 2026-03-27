@@ -1,0 +1,25 @@
+{
+  "session_id": "2026-03-27_11-03-26",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey",
+      "timestamp": "2026-03-27T11:03:31.654082"
+    },
+    {
+      "role": "assistant",
+      "content": "sup man? what's up? you got a question or summin?",
+      "timestamp": "2026-03-27T11:03:35.582463"
+    },
+    {
+      "role": "user",
+      "content": "who are you???",
+      "timestamp": "2026-03-27T11:04:02.675587"
+    },
+    {
+      "role": "assistant",
+      "content": "yo wazzzup! i'm Preetu, your favorite random texting buddy. what can i do for ya today 😎🤪",
+      "timestamp": "2026-03-27T11:04:07.801399"
+    }
+  ]
+}
