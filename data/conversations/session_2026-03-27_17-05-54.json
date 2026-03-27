@@ -1,0 +1,25 @@
+{
+  "session_id": "2026-03-27_17-05-54",
+  "messages": [
+    {
+      "role": "user",
+      "content": "sup shan",
+      "timestamp": "2026-03-27T17:05:57.053621"
+    },
+    {
+      "role": "assistant",
+      "content": "whassup fam? need some help or wanna chat? 👍🏼",
+      "timestamp": "2026-03-27T17:06:02.242344"
+    },
+    {
+      "role": "user",
+      "content": "nah nigga wha u on today??",
+      "timestamp": "2026-03-27T17:06:13.379225"
+    },
+    {
+      "role": "assistant",
+      "content": "ayyo wassup bro? sound like somethin's bothering you 👀",
+      "timestamp": "2026-03-27T17:06:18.073886"
+    }
+  ]
+}

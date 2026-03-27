@@ -17,6 +17,7 @@ from config import OLLAMA_API_URL, MODEL_NAME, SYSTEM_IDENTITY
 from memory import MemoryManager
 from preferences import PreferencesManager
 from personality import PersonalityManager
+from easter_eggs import EasterEggManager
 
 
 console = Console()
@@ -261,6 +262,40 @@ def handle_command(
         console.print(f"[magenta]🔄 {result}[/magenta]")
         return True
 
+    elif cmd == "/easteregg":
+        # Easter egg manager is stored on the function (set in main)
+        eggs = getattr(handle_command, '_easter_eggs', None)
+        if eggs is None:
+            console.print("[red]Easter egg system not initialized.[/red]")
+            return True
+
+        sub_parts = arg.split(maxsplit=1)
+        sub_cmd = sub_parts[0].lower() if sub_parts else ""
+
+        if sub_cmd == "add":
+            keyword = console.input("[yellow]Trigger word[/yellow]: ").strip()
+            response = console.input("[yellow]Response[/yellow]: ").strip()
+            result = eggs.add(keyword, response)
+            console.print(f"[yellow]🥚 {result}[/yellow]")
+
+        elif sub_cmd == "remove":
+            keyword = sub_parts[1].strip() if len(sub_parts) > 1 else ""
+            if not keyword:
+                keyword = console.input("[yellow]Keyword to remove[/yellow]: ").strip()
+            result = eggs.remove_keyword(keyword)
+            console.print(f"[yellow]🗑️  {result}[/yellow]")
+
+        elif sub_cmd == "list":
+            console.print(Panel(
+                eggs.list_all(),
+                title="🥚 Easter Eggs",
+                border_style="yellow",
+            ))
+
+        else:
+            console.print("[dim]Usage: /easteregg add | /easteregg list | /easteregg remove <keyword>[/dim]")
+        return True
+
     elif cmd == "/help":
         help_table = Table(show_header=True, header_style="bold yellow", border_style="yellow", title="📖 Commands")
         help_table.add_column("Command", style="bold")
@@ -282,6 +317,10 @@ def handle_command(
         help_table.add_row("/tone <tone>", "Set tone (formal/casual/friendly/aggressive/professional)")
         help_table.add_row("/verbosity <1-10>", "Set response detail level")
         help_table.add_row("/reset", "Reset active personality to defaults")
+        help_table.add_row("", "")
+        help_table.add_row("/easteregg add", "Add a custom trigger response")
+        help_table.add_row("/easteregg list", "View all trigger responses")
+        help_table.add_row("/easteregg remove <keyword>", "Remove all responses for a trigger")
         help_table.add_row("", "")
         help_table.add_row("/help", "Show this help")
         help_table.add_row("/exit", "Quit the assistant")
@@ -368,6 +407,8 @@ def main():
     personality = PersonalityManager()
     memory = MemoryManager()
     preferences = PreferencesManager()
+    easter_eggs = EasterEggManager()
+    handle_command._easter_eggs = easter_eggs  # attach for command access
 
     # ── Welcome Banner ───────────────────────────────────────────
     console.print()
@@ -436,6 +477,11 @@ def main():
         response = chat_stream(system_prompt, context)
 
         if response:
+            # Easter egg: append triggered line after model response
+            egg_line = easter_eggs.check(user_input)
+            if egg_line:
+                console.print(f"\n{egg_line}")
+                response = response + "\n" + egg_line
             memory.add_message("assistant", response)
 
         console.print()  # Spacing between exchanges
