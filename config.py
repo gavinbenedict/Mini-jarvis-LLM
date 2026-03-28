@@ -7,7 +7,7 @@ import os
 
 # ── Ollama Settings ──────────────────────────────────────────────
 OLLAMA_API_URL = "http://localhost:11434"
-MODEL_NAME = "mistral"
+MODEL_NAME = "llama3:8b"
 
 # ── Paths ────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -17,7 +17,7 @@ PREFERENCES_FILE = os.path.join(DATA_DIR, "preferences.json")
 PERSONALITY_FILE = os.path.join(DATA_DIR, "personality.json")
 
 # ── Memory Limits ────────────────────────────────────────────────
-MAX_CURRENT_MESSAGES = 20          # Max messages to keep in active context
+MAX_CURRENT_MESSAGES = 7          # Max messages to keep in active context
 MAX_PAST_SNIPPETS = 3              # Max snippets to retrieve from past sessions
 MAX_SNIPPET_LENGTH = 300           # Max characters per ret rieved snippet
 
