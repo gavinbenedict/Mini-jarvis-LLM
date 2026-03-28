@@ -41,7 +41,7 @@ ollama pull mistral
 
 **Verify it works:**
 ```bash
-ollama run mistral "Say hello in one sentence"
+ollama run llama3:8b "Say hello in one sentence"
 ```
 
 ### Step 3: Set Up Python
