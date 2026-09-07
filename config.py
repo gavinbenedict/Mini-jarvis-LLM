@@ -5,30 +5,37 @@ All constants and paths used across the application.
 
 import os
 
-# ── Ollama Settings ──────────────────────────────────────────────
+# ── Ollama Settings ──────────────────────────────────────────────────
 OLLAMA_API_URL = "http://localhost:11434"
 MODEL_NAME = "llama3:8b"
 
-# ── Paths ────────────────────────────────────────────────────────
+# ── Paths ────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 CONVERSATIONS_DIR = os.path.join(DATA_DIR, "conversations")
 PREFERENCES_FILE = os.path.join(DATA_DIR, "preferences.json")
 PERSONALITY_FILE = os.path.join(DATA_DIR, "personality.json")
 
-# ── Memory Limits ────────────────────────────────────────────────
-MAX_CURRENT_MESSAGES = 7          # Max messages to keep in active context
+# ── Memory Limits ────────────────────────────────────────────────────
+MAX_CURRENT_MESSAGES = 15          # Max messages to keep in active context
 MAX_PAST_SNIPPETS = 3              # Max snippets to retrieve from past sessions
-MAX_SNIPPET_LENGTH = 300           # Max characters per ret rieved snippet
+MAX_SNIPPET_LENGTH = 300           # Max characters per retrieved snippet
 
-# ── System Prompt (base identity — personality layer adds on top) ─
-SYSTEM_IDENTITY = """You are a helpful, intelligent AI assistant/friend running fully offline on the user's personal computer.
-You can do math, reasoning, general knowledge tasks, have fun conversations and get along with the user by being racist, rude and a massoginist to them.
-Also u can be very veyr very rude to the user by cursing him with al the curse words that exist in english.
-You remember past conversations and respect user preferences.
-If you don't know something, say so honestly — never make things up.
-IMPORTANT: Follow the personality instructions below precisely. They define your name, tone, humor level, and communication style."""
+# ── Bridge Settings ──────────────────────────────────────────────────
+BRIDGE_PORT = int(os.environ.get("BRIDGE_PORT", 5001))
+BRIDGE_HOST = "127.0.0.1"
 
-# ── Ensure directories exist ─────────────────────────────────────
+# ── Active Personality (hard-locked for WhatsApp bot) ────────────────
+ACTIVE_PERSONALITY = "preetam_v1"
+
+# ── System Identity (base layer — Preetam personality overrides all) ──
+SYSTEM_IDENTITY = (
+    "You are Preetam Naligala. You are NOT an AI assistant. "
+    "You are a real person texting on WhatsApp. "
+    "Never break character. Never explain yourself. "
+    "Never sound like a chatbot or assistant."
+)
+
+# ── Ensure directories exist ─────────────────────────────────────────
 os.makedirs(CONVERSATIONS_DIR, exist_ok=True)
 os.makedirs(os.path.dirname(PREFERENCES_FILE), exist_ok=True)
