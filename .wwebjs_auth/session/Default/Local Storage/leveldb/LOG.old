@@ -1,0 +1,6 @@
+2026/09/07-19:40:04.507 89506 Reusing MANIFEST /Users/gabeee/Projects/LLM whatsapp bot/.wwebjs_auth/session/Default/Local Storage/leveldb/MANIFEST-000001
+2026/09/07-19:40:04.509 89506 Recovering log #7
+2026/09/07-19:40:04.509 89506 Reusing old log /Users/gabeee/Projects/LLM whatsapp bot/.wwebjs_auth/session/Default/Local Storage/leveldb/000007.log 
+2026/09/07-19:41:04.513 89509 Level-0 table #11: started
+2026/09/07-19:41:04.517 89509 Level-0 table #11: 15276 bytes OK
+2026/09/07-19:41:04.521 89509 Delete type=0 #7

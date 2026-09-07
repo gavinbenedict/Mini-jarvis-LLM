@@ -8,6 +8,7 @@ custom personalities (style_prompt, examples, rules).
 import json
 import os
 
+from config import ACTIVE_PERSONALITY
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _DATA_DIR = os.path.join(_BASE_DIR, "data")
@@ -19,16 +20,16 @@ os.makedirs(_DATA_DIR, exist_ok=True)
 DEFAULT_PERSONALITY = {
     "type": "built_in",
     "assistant_name": "Jarvis",
-    "humor": 3,        # 0 = dead serious, 10 = maximum comedy
-    "sarcasm": 0,      # 0 = none, 10 = dripping sarcasm
-    "tone": "friendly", # formal | casual | friendly | aggressive | professional
+    "humor": 1,        # 0 = dead serious, 10 = maximum comedy
+    "sarcasm": 10,      # 0 = none, 10 = dripping sarcasm
+    "tone": "aggressive", # formal | casual | friendly | aggressive | professional
     "verbosity": 5,    # 1 = ultra-terse, 10 = very detailed
 }
 
 DEFAULT_STORE = {
-    "active_personality": "default",
+    "active_personality": ACTIVE_PERSONALITY,
     "personalities": {
-        "default": dict(DEFAULT_PERSONALITY),
+        ACTIVE_PERSONALITY: dict(DEFAULT_PERSONALITY),
     },
 }
 
@@ -39,9 +40,35 @@ MAX_EXAMPLES = 5
 class PersonalityManager:
     """Manages multiple personalities (built_in + custom) with persistent storage."""
 
-    def __init__(self):
+    def __init__(self, force_personality: str | None = None):
+        """
+        Args:
+            force_personality: If given, override the active personality to this key
+                               regardless of what is stored in the JSON file.
+                               Used by jarvis_bridge.py to hard-lock preetam_v1.
+        """
         self._store: dict = self._load_store()
+
+        if force_personality:
+            self._enforce_personality(force_personality)
+
         self.traits: dict = self._active_personality()
+
+    # ── Hard-lock helper ─────────────────────────────────────────
+
+    def _enforce_personality(self, name: str):
+        """
+        Ensure `name` is the active personality.
+        If it doesn't exist in the store, raise an error.
+        Saves the updated store to disk.
+        """
+        if name not in self._store.get("personalities", {}):
+            raise ValueError(
+                f"Personality '{name}' not found in personality.json. "
+                f"Available: {list(self._store['personalities'].keys())}"
+            )
+        self._store["active_personality"] = name
+        self._save_store()
 
     # ── Getters ──────────────────────────────────────────────────
 
@@ -211,7 +238,7 @@ class PersonalityManager:
 
     @property
     def active_personality_name(self) -> str:
-        return self._store.get("active_personality", "default")
+        return self._store.get("active_personality", ACTIVE_PERSONALITY)
 
     def get_display_summary(self) -> str:
         """Get a formatted summary of the active personality."""
@@ -308,10 +335,10 @@ class PersonalityManager:
         return f"Built-in personality '{pname}' created! Use /personality switch {pname} to activate."
 
     def delete_personality(self, pname: str) -> str:
-        """Delete a personality (cannot delete active or 'default')."""
+        """Delete a personality (cannot delete active or ACTIVE_PERSONALITY)."""
         pname = pname.strip().lower().replace(" ", "_")
-        if pname == "default":
-            return "Cannot delete the default personality."
+        if pname == ACTIVE_PERSONALITY:
+            return f"Cannot delete the locked personality '{ACTIVE_PERSONALITY}'."
         if pname == self.active_personality_name:
             return "Cannot delete the active personality. Switch first."
         if pname not in self._store["personalities"]:
@@ -324,7 +351,7 @@ class PersonalityManager:
 
     def _active_personality(self) -> dict:
         """Get the active personality dict, with defaults filled in."""
-        active = self._store.get("active_personality", "default")
+        active = self._store.get("active_personality", ACTIVE_PERSONALITY)
         data = dict(DEFAULT_PERSONALITY)
         data.update(self._store["personalities"].get(active, {}))
         return data
@@ -344,7 +371,7 @@ class PersonalityManager:
         if "personalities" not in saved:
             migrated = json.loads(json.dumps(DEFAULT_STORE))
             saved.setdefault("type", "built_in")
-            migrated["personalities"]["default"] = saved
+            migrated["personalities"][ACTIVE_PERSONALITY] = saved
             self._store = migrated
             self._save_store()
             return migrated

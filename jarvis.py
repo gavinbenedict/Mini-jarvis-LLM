@@ -257,6 +257,9 @@ def handle_command(
         return True
 
     elif cmd == "/reset":
+        if personality.traits.get("type") == "custom":
+            console.print("[red]❌ Reset is disabled for custom personalities[/red]")
+            return True
         result = personality.reset()
         console.print(f"[magenta]🔄 {result}[/magenta]")
         return True
@@ -281,12 +284,13 @@ def handle_command(
         help_table.add_row("/sarcasm <0-10>", "Set sarcasm level")
         help_table.add_row("/tone <tone>", "Set tone (formal/casual/friendly/aggressive/professional)")
         help_table.add_row("/verbosity <1-10>", "Set response detail level")
-        help_table.add_row("/reset", "Reset active personality to defaults")
+        help_table.add_row("/reset", "Reset built-in personality (disabled for custom personalities)")
         help_table.add_row("", "")
         help_table.add_row("/help", "Show this help")
         help_table.add_row("/exit", "Quit the assistant")
 
         console.print(help_table)
+        console.print("[dim]Note: Custom personalities cannot be reset. Switch to default to use /reset.[/dim]")
         return True
 
     return False
