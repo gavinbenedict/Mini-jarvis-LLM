@@ -6,7 +6,7 @@
  *
  * Key behaviours:
  *   - Waits for the Python bridge to be healthy before starting WhatsApp
- *   - Only replies to TARGET_CHAT_ID (from .env)
+ *   - Only replies to chats listed in TARGET_CHAT_IDS (from .env)
  *   - Handles both @c.us DMs and @lid / @g.us group chats
  *   - Fully async — no blocking calls, event loop stays alive
  *   - No fake typing delays — replies instantly
@@ -24,7 +24,13 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 
 // ── Config ────────────────────────────────────────────────────────────
-const TARGET_CHAT_ID = (process.env.TARGET_CHAT_ID || '').trim();
+// Parse comma-separated list of target chat IDs.
+// Falls back to old TARGET_CHAT_ID for backward compatibility.
+const TARGET_CHAT_IDS = (process.env.TARGET_CHAT_IDS || process.env.TARGET_CHAT_ID || '')
+    .split(',')
+    .map(id => id.trim())
+    .filter(id => id.length > 0);
+
 const BRIDGE_PORT    = parseInt(process.env.BRIDGE_PORT || '5001', 10);
 const BRIDGE_HOST    = '127.0.0.1';
 const BRIDGE_URL     = `http://${BRIDGE_HOST}:${BRIDGE_PORT}`;
@@ -33,8 +39,8 @@ const BRIDGE_URL     = `http://${BRIDGE_HOST}:${BRIDGE_PORT}`;
 const BRIDGE_WAIT_TIMEOUT_MS = 60_000;
 const BRIDGE_POLL_INTERVAL_MS = 1_500;
 
-if (!TARGET_CHAT_ID) {
-    console.error('❌  TARGET_CHAT_ID is not set in .env — bot will not reply to anything.');
+if (TARGET_CHAT_IDS.length === 0) {
+    console.error('❌  TARGET_CHAT_IDS is not set in .env — bot will not reply to anything.');
     console.error('    Run `node chat_id.js`, send a message, and copy the FROM value.');
     process.exit(1);
 }
@@ -54,24 +60,25 @@ function normaliseId(id) {
 }
 
 /**
- * Return true if `from` matches the target chat, regardless of whether
- * the stored ID uses @c.us, @lid, @g.us, or @s.whatsapp.net.
+ * Return true if `from` matches ANY of the configured target chats,
+ * regardless of whether the stored ID uses @c.us, @lid, @g.us, or
+ * @s.whatsapp.net.
  *
- * Strategy:
+ * Strategy (per target):
  *   1. Exact match (after normalisation)
  *   2. Numeric prefix match — strip the @xxx suffix from both sides
  */
 function isTargetChat(from) {
-    const normFrom   = normaliseId(from);
-    const normTarget = normaliseId(TARGET_CHAT_ID);
+    const normFrom = normaliseId(from);
+    const numFrom  = normFrom.split('@')[0];
 
-    if (normFrom === normTarget) return true;
+    return TARGET_CHAT_IDS.some(targetId => {
+        const normTarget = normaliseId(targetId);
+        if (normFrom === normTarget) return true;
 
-    // Extract numeric part before '@'
-    const numFrom   = normFrom.split('@')[0];
-    const numTarget = normTarget.split('@')[0];
-
-    return numFrom === numTarget && numFrom.length > 0;
+        const numTarget = normTarget.split('@')[0];
+        return numFrom === numTarget && numFrom.length > 0;
+    });
 }
 
 // ── HTTP helper ──────────────────────────────────────────────────────
@@ -200,9 +207,9 @@ async function handleMessage(message) {
     // For groups:  message.from = group JID,  message.author = sender JID
     // For DMs:     message.from = sender JID, message.author = ''
     //
-    // We want to reply only when the CHAT (from) matches TARGET_CHAT_ID.
+    // We want to reply only when the CHAT (from) is in TARGET_CHAT_IDS.
     if (!isTargetChat(from)) {
-        console.log(`[SKIP] ${from} — not target chat (target: ${TARGET_CHAT_ID})`);
+        console.log(`[SKIP] ${from} — not a target chat`);
         return null;
     }
 
@@ -287,7 +294,10 @@ function attachListeners(c) {
     c.on('ready', () => {
         console.log('\n' + '═'.repeat(50));
         console.log('✅  WhatsApp Bot Ready');
-        console.log(`    Target chat : ${TARGET_CHAT_ID}`);
+        console.log(`    Target chats: ${TARGET_CHAT_IDS.length} configured`);
+        for (const id of TARGET_CHAT_IDS) {
+            console.log(`      • ${id}`);
+        }
         console.log(`    Bridge      : ${BRIDGE_URL}`);
         console.log(`    Personality : preetam_v1`);
         console.log('═'.repeat(50) + '\n');
@@ -373,7 +383,10 @@ process.on('unhandledRejection', (reason) => {
     console.log('\n' + '═'.repeat(50));
     console.log('  Mini-Jarvis WhatsApp Bot  |  Starting...');
     console.log('═'.repeat(50));
-    console.log(`  Target chat : ${TARGET_CHAT_ID}`);
+    console.log(`  Target chats: ${TARGET_CHAT_IDS.length} configured`);
+    for (const id of TARGET_CHAT_IDS) {
+        console.log(`    • ${id}`);
+    }
     console.log(`  Bridge port : ${BRIDGE_PORT}`);
     console.log('═'.repeat(50) + '\n');
 

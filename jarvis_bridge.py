@@ -51,6 +51,7 @@ from config import (
 from memory import MemoryManager
 from personality import PersonalityManager
 from preferences import PreferencesManager
+from contacts import ContactsRegistry
 
 # ── Logging ──────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -66,6 +67,9 @@ app = Flask(__name__)
 # ── Global personality (shared, read-only after init) ────────────────
 # Locks to preetam_v1 on startup — never changes at runtime.
 personality: PersonalityManager | None = None
+
+# ── Global identity registry (persistent, loaded once at init) ───────
+contacts: ContactsRegistry | None = None
 
 # ── Per-chat state ───────────────────────────────────────────────────
 # Memory is keyed by chat_id so that all participants in a group share
@@ -133,6 +137,7 @@ def build_system_prompt(
     *,
     is_group: bool = False,
     current_sender: str = "",
+    sender_known: bool = True,
 ) -> str:
     """
     Construct the full system prompt in layers:
@@ -141,6 +146,7 @@ def build_system_prompt(
     3. User preferences (name, language, etc.)
     4. Past conversation context (relevant snippets)
     5. Group chat context (if applicable)
+    6. Unknown-sender prompt (if applicable)
     """
     assert personality is not None, "Personality not initialized"
 
@@ -172,6 +178,14 @@ def build_system_prompt(
         if current_sender:
             group_note += f" The message you are replying to right now was sent by {current_sender}."
         parts.append(group_note)
+
+    # Layer 6: Unknown sender — ask for introduction
+    if not sender_known:
+        parts.append(
+            "\nYou don't recognize the person who just messaged you. "
+            "Casually ask who they are — keep it natural, like texting someone "
+            "whose number you don't have saved. Don't be formal about it."
+        )
 
     return "\n".join(parts)
 
@@ -281,7 +295,37 @@ def chat():
     # In a DM, chat_id == sender, so is_group will be False.
     is_group = chat_id != sender and sender != "unknown"
 
-    display = sender_name or sender
+    # ── Identity resolution via persistent contacts registry ─────
+    display_name = None   # confirmed name from registry (or None if unknown)
+    sender_known = False
+
+    if contacts and sender != "unknown":
+        confirmed = contacts.lookup(sender)
+        if confirmed:
+            # Known person — use their confirmed name
+            display_name = confirmed
+            sender_known = True
+        elif contacts.is_pending_intro(sender):
+            # We already asked — try to extract name from their reply
+            extracted = contacts.try_extract_name(text)
+            if extracted:
+                contacts.register(sender, extracted)
+                contacts.clear_pending_intro(sender)
+                display_name = extracted
+                sender_known = True
+                log.info("📇 Registered contact: %s → %s", sender, extracted)
+            else:
+                # Couldn't extract name — keep pending, model will ask again
+                display_name = None
+                sender_known = False
+        else:
+            # First-time unknown sender — mark as pending intro
+            contacts.set_pending_intro(sender)
+            display_name = None
+            sender_known = False
+            log.info("👤 Unknown sender: %s — will ask for name", sender)
+
+    display = display_name or sender_name or sender
     log.info("💬 [%s] %s", display, text[:80])
 
     # Per-chat state (all group participants share one memory timeline)
@@ -293,18 +337,23 @@ def chat():
     if pref_note:
         log.info("📝 Preference detected: %s", pref_note)
 
-    # Build system prompt (with group context if applicable)
+    # Build system prompt (with group context and identity awareness)
     system_prompt = build_system_prompt(
         prefs, mem, text,
         is_group=is_group,
-        current_sender=sender_name,
+        current_sender=display_name or "",
+        sender_known=sender_known,
     )
 
     # For group messages, prefix with sender identity so the LLM can
-    # distinguish who said what.  Use the display name if available,
-    # otherwise fall back to the raw sender JID.
+    # distinguish who said what.  Use confirmed name from the identity
+    # registry; fall back to a short "Unknown" label for unrecognised senders.
     if is_group:
-        tag = sender_name or sender
+        if display_name:
+            tag = display_name
+        else:
+            jid_num = sender.split("@")[0][-4:]  # last 4 digits for readability
+            tag = f"Unknown ({jid_num})"
         tagged_text = f"[{tag}]: {text}"
     else:
         tagged_text = text
@@ -344,7 +393,7 @@ def chat():
 
 def init():
     """Initialize the bridge. Called once before serving."""
-    global personality
+    global personality, contacts
 
     log.info("=" * 55)
     log.info("  Mini-Jarvis Bridge  |  %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -362,6 +411,10 @@ def init():
     except ValueError as exc:
         log.error("❌ Personality error: %s", exc)
         sys.exit(1)
+
+    # Load persistent identity registry
+    contacts = ContactsRegistry()
+    log.info("📇 Contacts registry loaded — %d known contact(s)", contacts.known_count())
 
     # Check Ollama
     log.info("Checking Ollama (%s) ...", OLLAMA_API_URL)
