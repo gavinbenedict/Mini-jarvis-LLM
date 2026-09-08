@@ -194,6 +194,7 @@ async function handleMessage(message) {
     const from   = message.from   || '';
     const author = message.author || '';  // populated for group messages
     const body   = (message.body  || '').trim();
+    const senderName = message._data?.notifyName || '';  // sender's WhatsApp display name
 
     // ── Chat filter ──────────────────────────────────────────────
     // For groups:  message.from = group JID,  message.author = sender JID
@@ -218,8 +219,8 @@ async function handleMessage(message) {
     }
 
     // Log the incoming message
-    const senderLabel = author || from;
-    console.log(`\n💬 [${senderLabel}] ${body}`);
+    const displayLabel = senderName || author || from;
+    console.log(`\n💬 [${displayLabel}] ${body}`);
 
     // ── Call bridge ──────────────────────────────────────────────
     let reply = null;
@@ -227,6 +228,7 @@ async function handleMessage(message) {
         const res = await httpPost(`${BRIDGE_URL}/chat`, {
             text:    body,
             sender:  author || from,   // use author for group attribution
+            sender_name: senderName,   // sender's WhatsApp display name
             chat_id: from,
         });
 

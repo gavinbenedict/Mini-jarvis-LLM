@@ -67,11 +67,12 @@ app = Flask(__name__)
 # Locks to preetam_v1 on startup — never changes at runtime.
 personality: PersonalityManager | None = None
 
-# ── Per-sender state ─────────────────────────────────────────────────
-# Each sender gets their own MemoryManager and PreferencesManager.
-# Keyed by normalized sender ID string.
-_sender_memory: dict[str, MemoryManager] = {}
-_sender_prefs: dict[str, PreferencesManager] = {}
+# ── Per-chat state ───────────────────────────────────────────────────
+# Memory is keyed by chat_id so that all participants in a group share
+# one conversation timeline. For DMs, chat_id == sender, so the
+# behaviour is identical to the previous per-sender keying.
+_chat_memory: dict[str, MemoryManager] = {}
+_chat_prefs: dict[str, PreferencesManager] = {}
 _state_lock = Lock()
 
 # ── Duplicate message prevention ─────────────────────────────────────
@@ -105,21 +106,21 @@ def check_ollama() -> bool:
 # ── State helpers ────────────────────────────────────────────────────
 
 
-def _get_sender_memory(sender_id: str) -> MemoryManager:
-    """Get or create a MemoryManager for this sender."""
+def _get_chat_memory(chat_id: str) -> MemoryManager:
+    """Get or create a MemoryManager for this chat (group or DM)."""
     with _state_lock:
-        if sender_id not in _sender_memory:
-            log.info("Creating new memory session for sender: %s", sender_id)
-            _sender_memory[sender_id] = MemoryManager()
-        return _sender_memory[sender_id]
+        if chat_id not in _chat_memory:
+            log.info("Creating new memory session for chat: %s", chat_id)
+            _chat_memory[chat_id] = MemoryManager()
+        return _chat_memory[chat_id]
 
 
-def _get_sender_prefs(sender_id: str) -> PreferencesManager:
-    """Get or create a PreferencesManager for this sender."""
+def _get_chat_prefs(chat_id: str) -> PreferencesManager:
+    """Get or create a PreferencesManager for this chat."""
     with _state_lock:
-        if sender_id not in _sender_prefs:
-            _sender_prefs[sender_id] = PreferencesManager()
-        return _sender_prefs[sender_id]
+        if chat_id not in _chat_prefs:
+            _chat_prefs[chat_id] = PreferencesManager()
+        return _chat_prefs[chat_id]
 
 
 # ── System prompt builder ────────────────────────────────────────────
@@ -129,6 +130,9 @@ def build_system_prompt(
     prefs: PreferencesManager,
     memory: MemoryManager,
     user_message: str,
+    *,
+    is_group: bool = False,
+    current_sender: str = "",
 ) -> str:
     """
     Construct the full system prompt in layers:
@@ -136,6 +140,7 @@ def build_system_prompt(
     2. Personality (preetam_v1 custom prompt + rules + examples)
     3. User preferences (name, language, etc.)
     4. Past conversation context (relevant snippets)
+    5. Group chat context (if applicable)
     """
     assert personality is not None, "Personality not initialized"
 
@@ -155,6 +160,18 @@ def build_system_prompt(
         parts.append("\nRelevant things from past conversations:")
         for snippet in past_snippets:
             parts.append(f"  {snippet}")
+
+    # Layer 5: Group chat awareness
+    if is_group:
+        group_note = (
+            "\nYou are in a WhatsApp group chat with multiple people. "
+            "Messages from participants are prefixed with their name in [brackets]. "
+            "Each [Name] is a different person. Keep track of who said what. "
+            "Do not confuse one person's words with another's."
+        )
+        if current_sender:
+            group_note += f" The message you are replying to right now was sent by {current_sender}."
+        parts.append(group_note)
 
     return "\n".join(parts)
 
@@ -229,9 +246,10 @@ def chat():
 
     Expected JSON body:
         {
-            "text":    "message content",
-            "sender":  "1234567890@c.us",   // normalized sender JID
-            "chat_id": "1234567890@c.us"    // chat JID (may differ for groups)
+            "text":       "message content",
+            "sender":     "1234567890@c.us",   // individual sender JID
+            "sender_name": "Ashwath",           // sender's WhatsApp display name
+            "chat_id":    "1234567890@c.us"     // chat JID (differs from sender for groups)
         }
 
     Returns:
@@ -248,6 +266,7 @@ def chat():
 
     text = (body.get("text") or "").strip()
     sender = (body.get("sender") or "unknown").strip()
+    sender_name = (body.get("sender_name") or "").strip()
     chat_id = (body.get("chat_id") or sender).strip()
 
     if not text:
@@ -258,22 +277,40 @@ def chat():
         log.warning("Duplicate message from %s — skipping: %s", sender, text[:60])
         return jsonify({"ok": False, "error": "duplicate message skipped"}), 200
 
-    log.info("💬 [%s] %s", sender, text[:80])
+    # Detect group chat: chat_id is the group JID, sender is the individual author.
+    # In a DM, chat_id == sender, so is_group will be False.
+    is_group = chat_id != sender and sender != "unknown"
 
-    # Per-sender state
-    mem = _get_sender_memory(sender)
-    prefs = _get_sender_prefs(sender)
+    display = sender_name or sender
+    log.info("💬 [%s] %s", display, text[:80])
+
+    # Per-chat state (all group participants share one memory timeline)
+    mem = _get_chat_memory(chat_id)
+    prefs = _get_chat_prefs(chat_id)
 
     # Detect preferences
     pref_note = prefs.detect_and_store(text)
     if pref_note:
         log.info("📝 Preference detected: %s", pref_note)
 
-    # Build system prompt
-    system_prompt = build_system_prompt(prefs, mem, text)
+    # Build system prompt (with group context if applicable)
+    system_prompt = build_system_prompt(
+        prefs, mem, text,
+        is_group=is_group,
+        current_sender=sender_name,
+    )
 
-    # Add user message to memory
-    mem.add_message("user", text)
+    # For group messages, prefix with sender identity so the LLM can
+    # distinguish who said what.  Use the display name if available,
+    # otherwise fall back to the raw sender JID.
+    if is_group:
+        tag = sender_name or sender
+        tagged_text = f"[{tag}]: {text}"
+    else:
+        tagged_text = text
+
+    # Add user message to memory (with sender metadata for auditability)
+    mem.add_message("user", tagged_text, sender=sender if is_group else "")
 
     # Build context window for Ollama
     context_messages = mem.get_context_messages()
@@ -298,7 +335,7 @@ def chat():
     # Save assistant reply to memory
     mem.add_message("assistant", reply)
 
-    log.info("🤖 [%s] %s", sender, reply[:80])
+    log.info("🤖 [%s] %s", display, reply[:80])
     return jsonify({"ok": True, "reply": reply})
 
 

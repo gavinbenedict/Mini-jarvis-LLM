@@ -22,13 +22,16 @@ class MemoryManager:
 
     # ── Current Session ──────────────────────────────────────────
 
-    def add_message(self, role: str, content: str):
+    def add_message(self, role: str, content: str, sender: str = ""):
         """Add a message to the current session and auto-save."""
-        self.messages.append({
+        msg = {
             "role": role,
             "content": content,
             "timestamp": datetime.now().isoformat(),
-        })
+        }
+        if sender:
+            msg["sender"] = sender
+        self.messages.append(msg)
         self._save_session()
 
     def get_context_messages(self) -> list[dict]:
