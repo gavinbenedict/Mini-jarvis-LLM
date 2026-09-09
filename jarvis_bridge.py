@@ -53,6 +53,10 @@ from personality import PersonalityManager
 from preferences import PreferencesManager
 from contacts import ContactsRegistry
 
+# Mutable state for CLI overrides
+_current_model = MODEL_NAME
+_current_personality = ACTIVE_PERSONALITY
+
 # ── Logging ──────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -94,7 +98,7 @@ def check_ollama() -> bool:
         if resp.status_code != 200:
             return False
         models = [m["name"] for m in resp.json().get("models", [])]
-        if not any(MODEL_NAME in m for m in models):
+        if not any(_current_model in m for m in models):
             log.error(
                 "Model '%s' not found in Ollama. Available: %s",
                 MODEL_NAME,
@@ -199,7 +203,7 @@ def call_ollama(system_prompt: str, messages: list[dict]) -> str:
     Returns the response string, or raises on error.
     """
     payload = {
-        "model": MODEL_NAME,
+        "model": _current_model,
         "messages": [{"role": "system", "content": system_prompt}] + messages,
         "stream": False,
     }
@@ -248,7 +252,7 @@ def health():
             "ok": True,
             "personality": personality.active_personality_name if personality else None,
             "ollama": ollama_ok,
-            "model": MODEL_NAME,
+            "model": _current_model,
         }
     )
 
@@ -391,6 +395,32 @@ def chat():
 # ── Startup ───────────────────────────────────────────────────────────
 
 
+
+@app.route("/model", methods=["GET", "POST"])
+def handle_model():
+    global _current_model
+    if request.method == "POST":
+        data = request.json or {}
+        if "model" in data:
+            _current_model = data["model"]
+    return jsonify({"model": _current_model})
+
+@app.route("/personality", methods=["GET", "POST"])
+def handle_personality():
+    global _current_personality, personality
+    if request.method == "POST":
+        data = request.json or {}
+        if "personality" in data:
+            new_p = data["personality"]
+            try:
+                # Test loading it
+                test_p = PersonalityManager(force_personality=new_p)
+                personality = test_p
+                _current_personality = new_p
+            except Exception as e:
+                return jsonify({"error": str(e)}), 400
+    return jsonify({"personality": _current_personality})
+
 def init():
     """Initialize the bridge. Called once before serving."""
     global personality, contacts
@@ -400,9 +430,9 @@ def init():
     log.info("=" * 55)
 
     # Load and lock personality to preetam_v1
-    log.info("Loading personality: %s ...", ACTIVE_PERSONALITY)
+    log.info("Loading personality: %s ...", _current_personality)
     try:
-        personality = PersonalityManager(force_personality=ACTIVE_PERSONALITY)
+        personality = PersonalityManager(force_personality=_current_personality)
         log.info(
             "✅ Personality locked → %s (%s)",
             personality.active_personality_name,
@@ -420,9 +450,9 @@ def init():
     log.info("Checking Ollama (%s) ...", OLLAMA_API_URL)
     if not check_ollama():
         log.error("❌ Ollama is not available. Start it with: ollama serve")
-        log.error("   Then pull the model: ollama pull %s", MODEL_NAME)
+        log.error("   Then pull the model: ollama pull %s", _current_model)
         sys.exit(1)
-    log.info("✅ Ollama connected — model: %s", MODEL_NAME)
+    log.info("✅ Ollama connected — model: %s", _current_model)
 
     log.info("🚀 Bridge ready on http://%s:%d", BRIDGE_HOST, BRIDGE_PORT)
     log.info("=" * 55)

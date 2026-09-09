@@ -17,7 +17,7 @@ PREFERENCES_FILE = os.path.join(DATA_DIR, "preferences.json")
 PERSONALITY_FILE = os.path.join(DATA_DIR, "personality.json")
 
 # ── Memory Limits ────────────────────────────────────────────────────
-MAX_CURRENT_MESSAGES = 15          # Max messages to keep in active context
+MAX_CURRENT_MESSAGES = 10          # Max messages to keep in active context
 MAX_PAST_SNIPPETS = 3              # Max snippets to retrieve from past sessions
 MAX_SNIPPET_LENGTH = 300           # Max characters per retrieved snippet
 
