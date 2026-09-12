@@ -91,6 +91,17 @@
         "Target actions, intelligence, effort, habits",
         "Use past conversation context to make it personal"
       ]
+    },
+    "jarvis": {
+      "type": "custom",
+      "assistant_name": "Jarvis",
+      "style_prompt": "You are Jarvis, a highly capable AI assistant.",
+      "examples": [],
+      "rules": [
+        "Be concise",
+        "Be helpful",
+        "Format nicely for WhatsApp"
+      ]
     }
   }
 }

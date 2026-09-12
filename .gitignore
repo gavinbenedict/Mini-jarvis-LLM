@@ -1,347 +1,93 @@
 # ============================================================
-# ENVIRONMENT & SECRETS
+# Mini Jarvis — Git Ignore
 # ============================================================
 
-.env
-.env.*
-!.env.example
-
-*.pem
-*.key
-*.crt
-*.cer
-*.p12
-*.pfx
-
-secrets/
-secret/
-secrets.json
-credentials.json
-config.local.*
-config.private.*
-*_secret.*
-*_secrets.*
-
-
-# ============================================================
-# PYTHON
-# ============================================================
-
-__pycache__/
-*.py[cod]
-*$py.class
-
-*.so
-
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-
-pip-wheel-metadata/
-share/python-wheels/
-
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-.coverage.*
-htmlcov/
-
-.tox/
-.nox/
-
-.pyre/
-.pytype/
-
-
-# ============================================================
-# VIRTUAL ENVIRONMENTS
-# ============================================================
-
-venv/
-.venv/
-env/
-ENV/
-env.bak/
-venv.bak/
-
-virtualenv/
-
-
-# ============================================================
-# LOGS
-# ============================================================
-
-*.log
-logs/
-log/
-
-debug.log
-error.log
-verbose.log
-
-
-# ============================================================
-# DATABASES / LOCAL DATA
-# ============================================================
-
-*.db
-*.sqlite
-*.sqlite3
-*.db-journal
-
-data/
-local_data/
-runtime_data/
-storage/
-
-# ============================================================
-# CACHE
-# ============================================================
-
-.cache/
-cache/
-tmp/
-temp/
-*.tmp
-*.temp
-
-
-# ============================================================
-# WHATSAPP / SESSION / AUTH DATA
-# ============================================================
-
-session/
-sessions/
-whatsapp-session/
-whatsapp-sessions/
-auth/
-auth_data/
-auth_data/
-whatsapp_auth/
-
-# Baileys / WhatsApp Web style session data
-creds/
-credentials/
-auth_info/
-
-# Browser automation data
-browser-data/
-browser_data/
-user-data/
-userdata/
-
-# QR / authentication artifacts
-*.qr
-*.png
-qr/
-qr_codes/
-
-
-# ============================================================
-# USER DATA / PERSONAL DATA
-# ============================================================
-
-users/
-user_data/
-user-data/
-
-contacts/
-contact_data/
-
-messages/
-message_data/
-chat_data/
-chats/
-
-personal_data/
-private_data/
-
-# Exported conversations
-exports/
-chat_exports/
-conversation_exports/
-
-
-# ============================================================
-# GENERATED FILES
-# ============================================================
-
-generated/
-output/
-outputs/
-artifacts/
-
-*.bak
-*.backup
-*.old
-
-
-# ============================================================
-# AI / MODEL FILES
-# ============================================================
-
-models/
-model/
-checkpoints/
-*.bin
-*.safetensors
-*.gguf
-*.pt
-*.pth
-*.onnx
-
-# Local vector databases / embeddings
-embeddings/
-vectorstore/
-vector_store/
-chroma/
-chroma_db/
-
-# ============================================================
-# AI / BOT RUNTIME DATA
-# ============================================================
-
-memory/
-memories/
-bot_memory/
-conversation_memory/
-
-runtime/
-runtime_state/
-state/
-
-# Personality data ONLY if it contains private/user-created data
-# Remove these lines if personalities are intentionally shipped
-# as part of the public project.
-personality_data/
-custom_personalities/
-
-
-# ============================================================
-# MACOS
-# ============================================================
-
-.DS_Store
-.AppleDouble
-.LSOverride
-
-._*
-
-.Spotlight-V100
-.Trashes
-.VolumeIcon.icns
-
-.fseventsd
-
-
-# ============================================================
-# IDE / EDITORS
-# ============================================================
-
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# VS Code local settings
-.vscode/settings.json
-
-
-# ============================================================
-# JUPYTER
-# ============================================================
-
-.ipynb_checkpoints/
-
-
-# ============================================================
-# NODE / JAVASCRIPT (IF USED BY WHATSAPP LAYER)
-# ============================================================
-
+# ------------------------------------------------------------
+# Dependencies
+# ------------------------------------------------------------
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 
-.pnpm-debug.log*
+# ------------------------------------------------------------
+# Python
+# ------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-.npm/
+# ------------------------------------------------------------
+# Environment / Secrets
+# ------------------------------------------------------------
+.env
+.env.*
+!.env.example
 
-
-# ============================================================
-# PLAYWRIGHT / PUPPETEER / BROWSER DATA
-# ============================================================
-
-.playwright/
+# ------------------------------------------------------------
+# WhatsApp Web / Browser / Puppeteer
+# ------------------------------------------------------------
+.wwebjs_auth/
+.wwebjs_cache/
 .puppeteer/
-.chromium/
-.chrome/
-.firefox/
+.puppeteer-cache/
+chromium/
+chrome/
+chrome-profile/
+browser-data/
+user-data/
+profile/
+SingletonLock
+SingletonCookie
+SingletonSocket
 
+# ------------------------------------------------------------
+# Runtime Data
+# ------------------------------------------------------------
+data/contacts.json
+data/preferences.json
+data/state.json
+data/targets.json
+data/conversations/
+tempchat/
 
-# ============================================================
-# OS / LOCAL CONFIG
-# ============================================================
+# ------------------------------------------------------------
+# Logs
+# ------------------------------------------------------------
+*.log
+logs/
 
-*.local
-*.local.json
-*.local.yaml
-*.local.yml
-*.local.toml
+# ------------------------------------------------------------
+# Temporary Files
+# ------------------------------------------------------------
+tmp/
+temp/
 
-local_config.*
-config.local.*
+# ------------------------------------------------------------
+# OS Files
+# ------------------------------------------------------------
+.DS_Store
+Thumbs.db
 
+# ------------------------------------------------------------
+# IDE
+# ------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
 
-# ============================================================
-# CLAUDE / GEMINI / AI TOOLING LOCAL FILES
-# ============================================================
-
-.claude/
-.gemini/
-
-# ============================================================
-# PROJECT-SPECIFIC PRIVATE FILES
-# ============================================================
-
-private/
-_private/
-local/
-_local/
-
-notes_private/
-docs_private/
-
-# ============================================================
-# SECRETS THAT MAY BE ACCIDENTALLY CREATED
-# ============================================================
-
-token.txt
-tokens.txt
-api_key.txt
-api_keys.txt
-apikey.txt
-apikeys.txt
-
-*.token
-*.tokens
-
-*.password
-*.passwd
-*.secret
+# ------------------------------------------------------------
+# Build / Coverage
+# ------------------------------------------------------------
+coverage/
+dist/
+build/
