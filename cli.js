@@ -57,6 +57,36 @@ function _push(entry) {
 //  HELPERS
 // ═══════════════════════════════════════════════════════════════════
 
+const STATE_FILE = path.join(__dirname, 'data', 'state.json');
+let _globalState = {
+    devmode: false,
+    model_enabled: true,
+    default_personality: 'jarvis'
+};
+
+function loadGlobalState() {
+    try {
+        if (fs.existsSync(STATE_FILE)) {
+            Object.assign(_globalState, JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')));
+        }
+    } catch {}
+}
+loadGlobalState();
+
+function saveGlobalState() {
+    try { fs.writeFileSync(STATE_FILE, JSON.stringify(_globalState, null, 2)); } catch {}
+}
+
+function isModelEnabled() {
+    return _globalState.model_enabled;
+}
+
+function isTargetEnabled(id) {
+    const names = loadTargetNames();
+    if (names[id] && names[id].enabled === false) return false;
+    return true;
+}
+
 function loadTargetNames() {
     try {
         if (!fs.existsSync(TARGETS_FILE)) return {};
@@ -134,10 +164,10 @@ function message(sender, chatId, text) {
     _out(`            ${chalk.white('"' + _trunc(text, 80) + '"')}`);
 }
 
-function reply(text) {
+function reply(text, assistantName = 'AI') {
     stats.replied++;
     _push({ type: 'reply', text });
-    _out(`${_ts()}  ${chalk.green('🤖')} ${chalk.bold.green('Preetam')}`);
+    _out(`${_ts()}  ${chalk.green('🤖')} ${chalk.bold.green(assistantName)}`);
     _out(`            ${chalk.green('"' + _trunc(text, 80) + '"')}`);
 }
 
@@ -256,8 +286,9 @@ function cmdTargets(args) {
         for (let i = 0; i < _rt.targetChatIds.length; i++) {
             const id = _rt.targetChatIds[i];
             const name = names[id]?.name || 'Unknown';
+            const enabledStr = (names[id]?.enabled === false) ? chalk.red('  [DISABLED]') : chalk.green('  [ENABLED]');
             const type = id.includes('@g.us') ? chalk.blue('GROUP') : id.includes('@c.us') ? chalk.magenta('DM   ') : chalk.yellow('OTHER');
-            _out(`  [${i+1}] ${chalk.bold(name)}`);
+            _out(`  [${i+1}] ${chalk.bold(name)}${enabledStr}`);
             _out(`      ${type}  ${chalk.dim(id)}\n`);
         }
         _div();
@@ -291,9 +322,19 @@ function cmdTargets(args) {
         if (isNaN(idx) || idx < 1 || idx > _rt.targetChatIds.length) return _out(chalk.red(`  Invalid target number: ${args[1]}`));
         const id = _rt.targetChatIds[idx - 1];
         const newName = args.slice(2).join(' ');
-        names[id] = { name: newName };
+        if (!names[id]) names[id] = {};
+        names[id].name = newName;
         saveTargetNames(names);
         _out(chalk.green(`  ✓ Renamed target ${idx} to ${newName}`));
+    }
+    else if ((sub === 'enable' || sub === 'disable') && args.length === 2) {
+        const idx = parseInt(args[1], 10);
+        if (isNaN(idx) || idx < 1 || idx > _rt.targetChatIds.length) return _out(chalk.red(`  Invalid target number: ${args[1]}`));
+        const id = _rt.targetChatIds[idx - 1];
+        if (!names[id]) names[id] = { name: 'Unknown' };
+        names[id].enabled = (sub === 'enable');
+        saveTargetNames(names);
+        _out(chalk.green(`  ✓ Target ${idx} (${names[id].name}) is now ${sub}d for AI replies.`));
     }
     else {
         _out(`  Usage:`);
@@ -301,6 +342,8 @@ function cmdTargets(args) {
         _out(`    /targets add <chat_id> <name>`);
         _out(`    /targets remove <number>`);
         _out(`    /targets rename <number> <new_name>`);
+        _out(`    /targets enable <number>`);
+        _out(`    /targets disable <number>`);
     }
 }
 
@@ -392,6 +435,17 @@ async function cmdModel(args) {
     }
     
     let modelName = args[0];
+    if (modelName.toLowerCase() === 'on') {
+        _globalState.model_enabled = true;
+        saveGlobalState();
+        return _out(chalk.green(`  ✓ Global AI model responses ENABLED`));
+    }
+    if (modelName.toLowerCase() === 'off') {
+        _globalState.model_enabled = false;
+        saveGlobalState();
+        return _out(chalk.green(`  ✓ Global AI model responses DISABLED`));
+    }
+    
     if (modelName.toLowerCase() === 'use' || modelName.toLowerCase() === 'switch') {
         if (args.length < 2) return _out(chalk.dim("  Usage: /model use <name>"));
         modelName = args[1];
@@ -446,10 +500,12 @@ async function cmdPersonality(args) {
     if (sub === 'list') {
         let personalities = [];
         try {
-            const data = JSON.parse(fs.readFileSync(PERSONALITY_FILE, 'utf8'));
-            personalities = Object.keys(data);
+            if (_rt.httpGet) {
+                const res = await _rt.httpGet(`${_rt.bridgeUrl}/personality/list`);
+                if (res.status === 200 && res.body.ok) personalities = res.body.list;
+            }
         } catch (e) {
-            return _out(chalk.red(`  Could not read personality file: ${e.message}`));
+            return _out(chalk.red(`  Bridge error: ${e.message}`));
         }
         _out('');
         _div('AVAILABLE PERSONALITIES');
@@ -460,14 +516,17 @@ async function cmdPersonality(args) {
         _out('');
     }
     else if (sub === 'use' || sub === 'switch') {
-        if (args.length < 2) return _out(chalk.dim("  Usage: /personality use <name>"));
+        if (args.length < 3) return _out(chalk.dim("  Usage: /personality use <name> <target_index>"));
         const pName = args[1];
+        const idx = parseInt(args[2], 10);
+        if (isNaN(idx) || idx < 1 || idx > _rt.targetChatIds.length) return _out(chalk.red(`  Invalid target number: ${args[2]}`));
+        const chat_id = _rt.targetChatIds[idx - 1];
         
         try {
             if (_rt.httpPost) {
-                const res = await _rt.httpPost(`${_rt.bridgeUrl}/personality`, { personality: pName });
-                if (res.status === 200 && !res.body.error) {
-                    _out(chalk.green(`  ✓ Switched personality to: ${pName}`));
+                const res = await _rt.httpPost(`${_rt.bridgeUrl}/personality/use`, { chat_id, personality: pName });
+                if (res.status === 200 && res.body.ok) {
+                    _out(chalk.green(`  ✓ Switched personality for target ${idx} to: ${pName}`));
                 } else {
                     _out(chalk.red(`  Failed to switch personality: ${res.body.error || 'Unknown error'}`));
                 }
@@ -476,8 +535,18 @@ async function cmdPersonality(args) {
             _out(chalk.red(`  Bridge error: ${err.message}`));
         }
     }
+    else if (sub === 'default') {
+        if (args.length < 2) return _out(chalk.dim("  Usage: /personality default <name>"));
+        const pName = args[1];
+        _globalState.default_personality = pName;
+        saveGlobalState();
+        _out(chalk.green(`  ✓ Global default personality set to: ${pName}`));
+    }
+    else if (sub === 'create') {
+        _out(chalk.yellow(`  Creation via terminal not implemented yet.`));
+    }
     else {
-        _out(chalk.dim(`  Usage: /personality [list | use <name>]`));
+        _out(chalk.dim(`  Usage: /personality [list | use <name> <target_idx> | default <name>]`));
     }
 }
 
@@ -561,22 +630,25 @@ function cmdHelp() {
     _out('');
     _div('COMMANDS');
     const cmds = [
-        ['/targets',      'Manage target chats (add, remove, rename, list)'],
+        ['/targets',      'Manage target chats (add, remove, rename, enable, disable, list)'],
         ['/send',         'Manual send (e.g. /send all Hello, /send 1,3 Test)'],
-        ['/model',        'Manage Ollama models (list, use)'],
-        ['/personality',  'Manage active personality (list, use)'],
+        ['/model',        'Manage global AI responses (on, off) or Ollama models (list, use)'],
+        ['/personality',  'Manage personality (list, use, default, create)'],
         ['/status',       'Connection & runtime status dashboard'],
         ['/contacts',     'Show known contacts registry'],
         ['/history [n]',  'Show last n message events (default 20)'],
-        ['/stats',        'Runtime statistics'],
         ['/memory',       'Conversation memory info'],
-        ['/ping',         'Health check all services'],
-        ['/verbose',      'Enable verbose logging (skips, state changes)'],
         ['/quiet',        'Reduce output to messages + errors only'],
         ['/clear',        'Clear terminal screen'],
         ['/about',        'Project & environment info'],
+        ['/devmode',      'Toggle Developer Mode (enable, disable)'],
         ['/exit',         'Graceful shutdown'],
     ];
+    if (_globalState.devmode) {
+        cmds.push(['/ping', 'Health check all services (DEV)']);
+        cmds.push(['/stats', 'Runtime statistics (DEV)']);
+        cmds.push(['/verbose', 'Toggle verbose logging on/off (DEV)']);
+    }
     for (const [cmd, desc] of cmds) _out(`  ${chalk.cyan(cmd.padEnd(16))} ${chalk.dim(desc)}`);
     _div();
     _out('');
@@ -595,6 +667,14 @@ async function _dispatch(input) {
     const cmd   = parts[0].toLowerCase();
     const args  = parts.slice(1);
 
+    const requireDev = () => {
+        if (!_globalState.devmode) {
+            _out(chalk.red(`  Command ${cmd} requires Developer Mode. Use /devmode enable first.`));
+            return false;
+        }
+        return true;
+    };
+
     switch (cmd) {
         case '/help':  case '/h':       cmdHelp(); break;
         case '/status':                 await cmdStatus(); break;
@@ -604,10 +684,21 @@ async function _dispatch(input) {
         case '/personality':            await cmdPersonality(args); break;
         case '/contacts':               cmdContacts(); break;
         case '/history':                cmdHistory(parseInt(args[0]) || 20); break;
-        case '/stats':                  cmdStats(); break;
         case '/memory':                 cmdMemory(); break;
-        case '/ping':                   await cmdPing(); break;
-        case '/verbose':                _verbose = true; _quiet = false; _out(chalk.cyan('  Verbose mode enabled')); break;
+        case '/ping':                   if (requireDev()) await cmdPing(); break;
+        case '/stats':                  if (requireDev()) cmdStats(); break;
+        case '/verbose':
+            if (requireDev()) {
+                if (args[0] === 'on') { _verbose = true; _quiet = false; _out(chalk.cyan('  Verbose mode enabled')); }
+                else if (args[0] === 'off') { _verbose = false; _out(chalk.cyan('  Verbose mode disabled')); }
+                else _out(chalk.dim('  Usage: /verbose <on|off>'));
+            }
+            break;
+        case '/devmode':
+            if (args[0] === 'enable') { _globalState.devmode = true; saveGlobalState(); _out(chalk.cyan('  Developer Mode enabled')); }
+            else if (args[0] === 'disable') { _globalState.devmode = false; saveGlobalState(); _out(chalk.cyan('  Developer Mode disabled')); }
+            else _out(chalk.dim(`  Developer Mode is currently ${_globalState.devmode ? 'ENABLED' : 'DISABLED'}. Usage: /devmode <enable|disable>`));
+            break;
         case '/quiet':                  _quiet = true; _out(chalk.cyan('  Quiet mode enabled')); break;
         case '/clear':                  console.clear(); if (rl) rl.prompt(true); break;
         case '/about':                  _out(`\n  ${chalk.bold('Mini Jarvis — WhatsApp Bot')}\n  Architecture   WhatsApp → Node.js → Python Flask → Ollama\n`); break;
@@ -663,7 +754,12 @@ function close() {
 
 function init(config) { Object.assign(_rt, config); }
 
+function getDefaultPersonality() {
+    return _globalState.default_personality;
+}
+
 module.exports = {
     init, banner, startPrompt, pausePrompt, resumePrompt, close,
     system, success, message, reply, skip, skipDup, warn, error, verbose, bridgePoll, stats,
+    isModelEnabled, isTargetEnabled, getDefaultPersonality
 };

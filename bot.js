@@ -74,14 +74,8 @@ function normaliseId(id) {
  */
 function isTargetChat(from) {
     const normFrom = normaliseId(from);
-    const numFrom  = normFrom.split('@')[0];
-
     return TARGET_CHAT_IDS.some(targetId => {
-        const normTarget = normaliseId(targetId);
-        if (normFrom === normTarget) return true;
-
-        const numTarget = normTarget.split('@')[0];
-        return numFrom === numTarget && numFrom.length > 0;
+        return normFrom === normaliseId(targetId);
     });
 }
 
@@ -232,6 +226,16 @@ async function handleMessage(message) {
         return null;
     }
 
+    if (cli.isTargetEnabled && !cli.isTargetEnabled(from)) {
+        cli.skip(`${from} — target disabled via /targets`);
+        return null;
+    }
+
+    if (cli.isModelEnabled && !cli.isModelEnabled()) {
+        cli.skip(`model globally disabled`);
+        return null;
+    }
+
     // Duplicate guard (in-process)
     if (msgId && _repliedIds.has(msgId)) {
         cli.skipDup(`duplicate message id: ${msgId}`);
@@ -248,18 +252,46 @@ async function handleMessage(message) {
     const displayLabel = senderName || author || from;
     cli.message(displayLabel, from, body);
 
+    // ── WhatsApp Commands ─────────────────────────────────────────
+    if (body.startsWith('/personality ')) {
+        const parts = body.split(/\s+/);
+        const sub = (parts[1] || '').toLowerCase();
+        if (sub === 'use' && parts[2]) {
+            const pName = parts[2];
+            try {
+                const res = await httpPost(`${BRIDGE_URL}/personality/use`, { chat_id: from, personality: pName });
+                if (res.status === 200 && res.body.ok) {
+                    message.reply(`✓ Personality for this chat set to: ${pName}`);
+                    cli.reply(`Personality switched to ${pName}`, 'System');
+                } else {
+                    message.reply(`✗ Error: ${res.body.error}`);
+                    cli.error(`Failed to switch personality: ${res.body.error}`);
+                }
+            } catch (e) {
+                message.reply(`✗ Bridge error: ${e.message}`);
+                cli.error(`Bridge error: ${e.message}`);
+            }
+            return null; // Stop processing this message as a normal chat
+        }
+    }
+
     // ── Call bridge ──────────────────────────────────────────────
     let reply = null;
+    let assistantName = 'AI';
     try {
         const res = await httpPost(`${BRIDGE_URL}/chat`, {
             text:    body,
             sender:  author || from,   // use author for group attribution
             sender_name: senderName,   // sender's WhatsApp display name
             chat_id: from,
+            default_personality: (cli.getDefaultPersonality && cli.getDefaultPersonality()) || 'jarvis'
         });
 
         if (res.status === 200 && res.body.ok) {
             reply = (res.body.reply || '').trim();
+            if (res.body.assistant_name) {
+                assistantName = res.body.assistant_name;
+            }
         } else {
             const errMsg = res.body.error || `HTTP ${res.status}`;
             // Duplicate-skip is not a real error
@@ -286,7 +318,7 @@ async function handleMessage(message) {
         _repliedIds.delete(first);
     }
 
-    cli.reply(reply);
+    cli.reply(reply, assistantName);
     return reply;
 }
 

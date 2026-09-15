@@ -81,6 +81,7 @@ contacts: ContactsRegistry | None = None
 # behaviour is identical to the previous per-sender keying.
 _chat_memory: dict[str, MemoryManager] = {}
 _chat_prefs: dict[str, PreferencesManager] = {}
+_chat_personality: dict[str, str] = {}
 _state_lock = Lock()
 
 # ── Duplicate message prevention ─────────────────────────────────────
@@ -138,26 +139,38 @@ def build_system_prompt(
     prefs: PreferencesManager,
     memory: MemoryManager,
     user_message: str,
+    chat_personality_name: str,
     *,
     is_group: bool = False,
     current_sender: str = "",
     sender_known: bool = True,
-) -> str:
+) -> tuple[str, str]:
     """
-    Construct the full system prompt in layers:
-    1. Base identity (Preetam-specific, from config)
-    2. Personality (preetam_v1 custom prompt + rules + examples)
-    3. User preferences (name, language, etc.)
-    4. Past conversation context (relevant snippets)
-    5. Group chat context (if applicable)
-    6. Unknown-sender prompt (if applicable)
+    Construct the full system prompt and return (prompt, assistant_name).
     """
     assert personality is not None, "Personality not initialized"
 
-    parts = [SYSTEM_IDENTITY]
+    # Create a request-local copy of the manager to avoid mutating global state
+    import copy
+    local_pm = copy.copy(personality)
+
+    if chat_personality_name in local_pm._store.get("personalities", {}):
+        local_pm.traits = local_pm._store["personalities"][chat_personality_name]
+    else:
+        chat_personality_name = "jarvis"
+        if "jarvis" in local_pm._store.get("personalities", {}):
+            local_pm.traits = local_pm._store["personalities"]["jarvis"]
+
+    assistant_name = local_pm.name
+    pers_prompt = local_pm.build_personality_prompt()
+
+    if chat_personality_name == "preetam_v1":
+        parts = [SYSTEM_IDENTITY]
+    else:
+        parts = [f"You are a helpful AI assistant named {assistant_name}."]
 
     # Layer 2: Personality
-    parts.append(f"\n{personality.build_personality_prompt()}")
+    parts.append(f"\n{pers_prompt}")
 
     # Layer 3: User preferences
     pref_prompt = prefs.get_preferences_prompt()
@@ -191,7 +204,7 @@ def build_system_prompt(
             "whose number you don't have saved. Don't be formal about it."
         )
 
-    return "\n".join(parts)
+    return "\n".join(parts), assistant_name
 
 
 # ── Ollama call ──────────────────────────────────────────────────────
@@ -335,6 +348,9 @@ def chat():
     # Per-chat state (all group participants share one memory timeline)
     mem = _get_chat_memory(chat_id)
     prefs = _get_chat_prefs(chat_id)
+    
+    with _state_lock:
+        chat_pers_name = _chat_personality.get(chat_id, body.get("default_personality", "jarvis"))
 
     # Detect preferences
     pref_note = prefs.detect_and_store(text)
@@ -342,8 +358,9 @@ def chat():
         log.info("📝 Preference detected: %s", pref_note)
 
     # Build system prompt (with group context and identity awareness)
-    system_prompt = build_system_prompt(
+    system_prompt, assistant_name = build_system_prompt(
         prefs, mem, text,
+        chat_personality_name=chat_pers_name,
         is_group=is_group,
         current_sender=display_name or "",
         sender_known=sender_known,
@@ -405,21 +422,28 @@ def handle_model():
             _current_model = data["model"]
     return jsonify({"model": _current_model})
 
-@app.route("/personality", methods=["GET", "POST"])
-def handle_personality():
-    global _current_personality, personality
-    if request.method == "POST":
-        data = request.json or {}
-        if "personality" in data:
-            new_p = data["personality"]
-            try:
-                # Test loading it
-                test_p = PersonalityManager(force_personality=new_p)
-                personality = test_p
-                _current_personality = new_p
-            except Exception as e:
-                return jsonify({"error": str(e)}), 400
-    return jsonify({"personality": _current_personality})
+@app.route("/personality/list", methods=["GET"])
+def handle_personality_list():
+    if not personality: return jsonify({"error": "not initialized"}), 500
+    return jsonify({"ok": True, "list": list(personality._store.get("personalities", {}).keys())})
+
+@app.route("/personality/use", methods=["POST"])
+def handle_personality_use():
+    data = request.json or {}
+    chat_id = data.get("chat_id")
+    pname = data.get("personality")
+    if not chat_id or not pname:
+        return jsonify({"error": "missing chat_id or personality"}), 400
+    if pname not in personality._store.get("personalities", {}):
+        return jsonify({"error": f"unknown personality: {pname}"}), 400
+    
+    with _state_lock:
+        _chat_personality[chat_id] = pname
+        # Reset conversation context so the new personality has a clean slate
+        if chat_id in _chat_memory:
+            _chat_memory[chat_id] = MemoryManager()
+    
+    return jsonify({"ok": True})
 
 def init():
     """Initialize the bridge. Called once before serving."""
