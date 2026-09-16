@@ -246,6 +246,57 @@ function banner() {
 //  COMMAND HANDLERS
 // ═══════════════════════════════════════════════════════════════════
 
+
+
+async function cmdHumane(args) {
+    if (args.length === 0) {
+        _out(chalk.dim(`  Usage: /humane <off|on|status> <target>`));
+        return;
+    }
+    const sub = args[0].toLowerCase();
+    
+    if (sub === 'off' || sub === 'on') {
+        if (args.length < 2) return _out(chalk.dim("  Usage: /humane <off|on> <target>"));
+        const targetArg = args[1];
+        const targets = resolveTargets(targetArg, true);
+        if (!targets || targets.length === 0) return _out(chalk.red(`  Invalid target: ${targetArg}`));
+        
+        let successCount = 0;
+        if (_rt.setHumaneMode) {
+            for (const chat_id of targets) {
+                _rt.setHumaneMode(chat_id, sub);
+                successCount++;
+            }
+            _out(chalk.green(`  ✓ Humane mode set to ${sub.toUpperCase()} for ${successCount} target(s).`));
+        } else {
+            _out(chalk.red(`  Humane Mode not supported by runtime.`));
+        }
+    }
+    else if (sub === 'status') {
+        if (args.length < 2) return _out(chalk.dim("  Usage: /humane status <target>"));
+        const targetArg = args[1];
+        const targets = resolveTargets(targetArg, true);
+        if (!targets || targets.length === 0) return _out(chalk.red(`  Invalid target: ${targetArg}`));
+        
+        const names = loadTargetNames();
+        if (_rt.getHumaneMode) {
+            for (const chat_id of targets) {
+                const mode = _rt.getHumaneMode(chat_id);
+                _out('');
+                _div(`HUMANE MODE: ${names[chat_id]?.name || chat_id}`);
+                _out(`  Mode:        ${mode.toUpperCase()}`);
+                _div();
+            }
+            _out('');
+        } else {
+             _out(chalk.red(`  Failed to get humane status`));
+        }
+    } else {
+        _out(chalk.dim(`  Usage: /humane <off|on|status> <target>`));
+    }
+}
+
+
 async function cmdStatus() {
     let bridgeOk = false, ollamaOk = false, personality = 'unknown', model = 'unknown';
     if (_rt.httpGet) {
@@ -274,6 +325,24 @@ async function cmdStatus() {
     _out('');
 }
 
+
+function resolveTargets(targetArg, allowAll = false) {
+    if (!targetArg) return null;
+    const str = targetArg.toString().toLowerCase();
+    if (str === 'all') {
+        return allowAll ? [..._rt.targetChatIds] : null;
+    }
+    if (_rt.targetChatIds.includes(targetArg)) {
+        return [targetArg];
+    }
+    const idx = parseInt(targetArg, 10);
+    if (!isNaN(idx) && idx >= 1 && idx <= _rt.targetChatIds.length) {
+        return [_rt.targetChatIds[idx - 1]];
+    }
+    return null;
+}
+
+
 function cmdTargets(args) {
     const names = loadTargetNames();
     
@@ -299,8 +368,8 @@ function cmdTargets(args) {
     const sub = args[0].toLowerCase();
     
     if (sub === 'add' && args.length >= 3) {
-        const id = args[1];
-        const name = args.slice(2).join(' ');
+        const id = args[args.length - 1];
+        const name = args.slice(1, -1).join(' ');
         if (_rt.targetChatIds.includes(id)) return _out(chalk.yellow(`  Target ${id} is already in the list.`));
         _rt.targetChatIds.push(id);
         _rt.updateTargets(_rt.targetChatIds);
@@ -310,61 +379,70 @@ function cmdTargets(args) {
         _out(chalk.green(`  ✓ Added [${_rt.targetChatIds.length}] ${name} (${id})`));
     } 
     else if (sub === 'remove' && args.length === 2) {
-        const idx = parseInt(args[1], 10);
-        if (isNaN(idx) || idx < 1 || idx > _rt.targetChatIds.length) return _out(chalk.red(`  Invalid target number: ${args[1]}`));
-        const removed = _rt.targetChatIds.splice(idx - 1, 1)[0];
+        const targetArg = args[1];
+        const targets = resolveTargets(targetArg, false);
+        if (!targets || targets.length === 0) return _out(chalk.red(`  Invalid target: ${targetArg}`));
+        const removed = targets[0];
+        const idx = _rt.targetChatIds.indexOf(removed);
+        _rt.targetChatIds.splice(idx, 1);
         _rt.updateTargets(_rt.targetChatIds);
         updateEnvTargets(_rt.targetChatIds);
-        _out(chalk.green(`  ✓ Removed target ${idx}: ${names[removed]?.name || removed}`));
+        _out(chalk.green(`  ✓ Removed target ${idx+1}: ${names[removed]?.name || removed}`));
     }
     else if ((sub === 'rename' || sub === 'edit') && args.length >= 3) {
-        const idx = parseInt(args[1], 10);
-        if (isNaN(idx) || idx < 1 || idx > _rt.targetChatIds.length) return _out(chalk.red(`  Invalid target number: ${args[1]}`));
-        const id = _rt.targetChatIds[idx - 1];
-        const newName = args.slice(2).join(' ');
+        const targetArg = args[args.length - 1];
+        const targets = resolveTargets(targetArg, false);
+        if (!targets || targets.length === 0) return _out(chalk.red(`  Invalid target: ${targetArg}`));
+        const id = targets[0];
+        const newName = args.slice(1, -1).join(' ');
         if (!names[id]) names[id] = {};
         names[id].name = newName;
         saveTargetNames(names);
+        const idx = _rt.targetChatIds.indexOf(id) + 1;
         _out(chalk.green(`  ✓ Renamed target ${idx} to ${newName}`));
     }
     else if ((sub === 'enable' || sub === 'disable') && args.length === 2) {
-        const idx = parseInt(args[1], 10);
-        if (isNaN(idx) || idx < 1 || idx > _rt.targetChatIds.length) return _out(chalk.red(`  Invalid target number: ${args[1]}`));
-        const id = _rt.targetChatIds[idx - 1];
-        if (!names[id]) names[id] = { name: 'Unknown' };
-        names[id].enabled = (sub === 'enable');
+        const targetArg = args[1];
+        const targets = resolveTargets(targetArg, true);
+        if (!targets || targets.length === 0) return _out(chalk.red(`  Invalid target: ${targetArg}`));
+        for (const id of targets) {
+            if (!names[id]) names[id] = { name: 'Unknown' };
+            names[id].enabled = (sub === 'enable');
+        }
         saveTargetNames(names);
-        _out(chalk.green(`  ✓ Target ${idx} (${names[id].name}) is now ${sub}d for AI replies.`));
+        _out(chalk.green(`  ✓ ${targets.length} target(s) are now ${sub}d for AI replies.`));
     }
     else {
         _out(`  Usage:`);
         _out(`    /targets`);
-        _out(`    /targets add <chat_id> <name>`);
-        _out(`    /targets remove <number>`);
-        _out(`    /targets rename <number> <new_name>`);
-        _out(`    /targets enable <number>`);
-        _out(`    /targets disable <number>`);
+        _out(`    /targets add <name> <chat_id>`);
+        _out(`    /targets remove <target>`);
+        _out(`    /targets rename <new_name> <target>`);
+        _out(`    /targets enable <target>`);
+        _out(`    /targets disable <target>`);
     }
 }
 
+
 async function cmdSend(args) {
     if (args.length < 2) {
-        _out(chalk.dim("  Usage: /send <all|1,2,3> <message>"));
+        _out(chalk.dim("  Usage: /send <message> <target>"));
         return;
     }
-    const targetArg = args[0];
-    const msg = args.slice(1).join(' ');
+    const targetArg = args[args.length - 1];
+    const msg = args.slice(0, -1).join(' ');
     
     let toSend = [];
     if (targetArg.toLowerCase() === 'all') {
         toSend = [..._rt.targetChatIds];
     } else {
-        const indices = targetArg.split(',').map(n => parseInt(n.trim(), 10));
-        for (const idx of indices) {
-            if (isNaN(idx) || idx < 1 || idx > _rt.targetChatIds.length) {
-                return _out(chalk.red(`  Invalid target number: ${idx}`));
+        const indices = targetArg.split(',').map(n => n.trim());
+        for (const arg of indices) {
+            const targets = resolveTargets(arg, false);
+            if (!targets || targets.length === 0) {
+                return _out(chalk.red(`  Invalid target: ${arg}`));
             }
-            toSend.push(_rt.targetChatIds[idx - 1]);
+            toSend.push(targets[0]);
         }
         toSend = [...new Set(toSend)];
     }
@@ -398,6 +476,7 @@ async function cmdSend(args) {
     _div();
     _out('');
 }
+
 
 async function cmdModel(args) {
     if (args.length === 0 || args[0].toLowerCase() === 'list') {
@@ -479,6 +558,7 @@ async function cmdModel(args) {
     }
 }
 
+
 async function cmdPersonality(args) {
     if (args.length === 0) {
         let active = 'unknown';
@@ -516,23 +596,29 @@ async function cmdPersonality(args) {
         _out('');
     }
     else if (sub === 'use' || sub === 'switch') {
-        if (args.length < 3) return _out(chalk.dim("  Usage: /personality use <name> <target_index>"));
+        if (args.length < 3) return _out(chalk.dim("  Usage: /personality use <name> <target>"));
         const pName = args[1];
-        const idx = parseInt(args[2], 10);
-        if (isNaN(idx) || idx < 1 || idx > _rt.targetChatIds.length) return _out(chalk.red(`  Invalid target number: ${args[2]}`));
-        const chat_id = _rt.targetChatIds[idx - 1];
+        const targetArg = args[args.length - 1];
+        const targets = resolveTargets(targetArg, true);
+        if (!targets || targets.length === 0) return _out(chalk.red(`  Invalid target: ${targetArg}`));
         
-        try {
-            if (_rt.httpPost) {
-                const res = await _rt.httpPost(`${_rt.bridgeUrl}/personality/use`, { chat_id, personality: pName });
-                if (res.status === 200 && res.body.ok) {
-                    _out(chalk.green(`  ✓ Switched personality for target ${idx} to: ${pName}`));
-                } else {
-                    _out(chalk.red(`  Failed to switch personality: ${res.body.error || 'Unknown error'}`));
+        let successCount = 0;
+        for (const chat_id of targets) {
+            try {
+                if (_rt.httpPost) {
+                    const res = await _rt.httpPost(`${_rt.bridgeUrl}/personality/use`, { chat_id, personality: pName });
+                    if (res.status === 200 && res.body.ok) {
+                        successCount++;
+                    } else {
+                        _out(chalk.red(`  Failed for ${chat_id}: ${res.body.error || 'Unknown error'}`));
+                    }
                 }
+            } catch (err) {
+                _out(chalk.red(`  Bridge error for ${chat_id}: ${err.message}`));
             }
-        } catch (err) {
-            _out(chalk.red(`  Bridge error: ${err.message}`));
+        }
+        if (successCount > 0) {
+            _out(chalk.green(`  ✓ Switched personality to '${pName}' for ${successCount} target(s).`));
         }
     }
     else if (sub === 'default') {
@@ -546,67 +632,78 @@ async function cmdPersonality(args) {
         _out(chalk.yellow(`  Creation via terminal not implemented yet.`));
     }
     else {
-        _out(chalk.dim(`  Usage: /personality [list | use <name> <target_idx> | default <name>]`));
+        _out(chalk.dim(`  Usage: /personality [list | use <name> <target> | default <name>]`));
     }
 }
 
+
+
 async function cmdInternet(args) {
     if (args.length === 0) {
-        _out(chalk.dim(`  Usage: /internet <off|auto|on|status> <target_index>`));
+        _out(chalk.dim(`  Usage: /internet <off|auto|on|status> <target>`));
         return;
     }
     const sub = args[0].toLowerCase();
     
     if (sub === 'off' || sub === 'auto' || sub === 'on') {
-        if (args.length < 2) return _out(chalk.dim("  Usage: /internet <off|auto|on> <target_index>"));
-        const idx = parseInt(args[1], 10);
-        if (isNaN(idx) || idx < 1 || idx > _rt.targetChatIds.length) return _out(chalk.red(`  Invalid target number: ${args[1]}`));
-        const chat_id = _rt.targetChatIds[idx - 1];
-        try {
-            if (_rt.httpPost) {
-                const res = await _rt.httpPost(`${_rt.bridgeUrl}/internet/set`, { chat_id, mode: sub });
-                if (res.status === 200 && res.body.ok) {
-                    const names = loadTargetNames();
-                    const name = names[chat_id]?.name || chat_id;
-                    _out(chalk.green(`  ✓ Internet mode for target ${idx} (${name}) set to: ${sub.toUpperCase()}`));
-                } else {
-                    _out(chalk.red(`  Failed: ${res.body.error || 'Unknown error'}`));
+        if (args.length < 2) return _out(chalk.dim("  Usage: /internet <off|auto|on> <target>"));
+        const targetArg = args[1];
+        const targets = resolveTargets(targetArg, true);
+        if (!targets || targets.length === 0) return _out(chalk.red(`  Invalid target: ${targetArg}`));
+        
+        const names = loadTargetNames();
+        let successCount = 0;
+        for (const chat_id of targets) {
+            try {
+                if (_rt.httpPost) {
+                    const res = await _rt.httpPost(`${_rt.bridgeUrl}/internet/set`, { chat_id, mode: sub });
+                    if (res.status === 200 && res.body.ok) {
+                        successCount++;
+                    } else {
+                        _out(chalk.red(`  Failed for ${chat_id}: ${res.body.error || 'Unknown error'}`));
+                    }
                 }
+            } catch (err) {
+                _out(chalk.red(`  Bridge error for ${chat_id}: ${err.message}`));
             }
-        } catch (err) {
-            _out(chalk.red(`  Bridge error: ${err.message}`));
+        }
+        if (successCount > 0) {
+            _out(chalk.green(`  ✓ Internet mode set to ${sub.toUpperCase()} for ${successCount} target(s).`));
         }
     }
     else if (sub === 'status') {
-        const idx = parseInt(args[1], 10);
-        let chat_id = '';
-        if (!isNaN(idx) && idx >= 1 && idx <= _rt.targetChatIds.length) {
-            chat_id = _rt.targetChatIds[idx - 1];
-        }
-        try {
-            if (_rt.httpPost) {
-                const res = await _rt.httpPost(`${_rt.bridgeUrl}/internet/status`, { chat_id });
-                if (res.status === 200 && res.body.ok) {
-                    const b = res.body;
-                    _out('');
-                    _div('INTERNET ACCESS');
-                    _out(`  Mode:        ${b.mode}`);
-                    _out(`  Connection:  ${b.connection}`);
-                    _out(`  Web tools:   ${b.web_tools}`);
-                    _div();
-                    _out('');
-                } else {
-                    _out(chalk.red(`  Failed to get internet status`));
+        if (args.length < 2) return _out(chalk.dim("  Usage: /internet status <target>"));
+        const targetArg = args[1];
+        const targets = resolveTargets(targetArg, true);
+        if (!targets || targets.length === 0) return _out(chalk.red(`  Invalid target: ${targetArg}`));
+        
+        const names = loadTargetNames();
+        for (const chat_id of targets) {
+            try {
+                if (_rt.httpPost) {
+                    const res = await _rt.httpPost(`${_rt.bridgeUrl}/internet/status`, { chat_id });
+                    if (res.status === 200 && res.body.ok) {
+                        const b = res.body;
+                        _out('');
+                        _div(`INTERNET ACCESS: ${names[chat_id]?.name || chat_id}`);
+                        _out(`  Mode:        ${b.mode}`);
+                        _out(`  Connection:  ${b.connection}`);
+                        _out(`  Web tools:   ${b.web_tools}`);
+                        _div();
+                    } else {
+                        _out(chalk.red(`  Failed to get internet status for ${chat_id}`));
+                    }
                 }
+            } catch (err) {
+                _out(chalk.red(`  Bridge error for ${chat_id}: ${err.message}`));
             }
-        } catch (err) {
-            _out(chalk.red(`  Bridge error: ${err.message}`));
         }
-    }
-    else {
-        _out(chalk.dim(`  Usage: /internet <off|auto|on|status> [target_index]`));
+        _out('');
+    } else {
+        _out(chalk.dim(`  Usage: /internet <off|auto|on|status> <target>`));
     }
 }
+
 
 function cmdContacts() {
     let contacts = {};
@@ -684,26 +781,29 @@ async function cmdPing() {
     _out('');
 }
 
+
 function cmdHelp() {
     _out('');
     _div('COMMANDS');
     const cmds = [
-        ['/targets',      'Manage target chats (add, remove, rename, enable, disable, list)'],
-        ['/send',         'Manual send (e.g. /send all Hello, /send 1,3 Test)'],
-        ['/model',        'Manage global AI responses (on, off) or Ollama models (list, use)'],
-        ['/personality',  'Manage personality (list, use, default, create)'],
-        ['/internet',     'Internet access mode (off, auto, on, status)'],
+        ['/targets',      'List targets'],
+        ['/targets ...',  '/targets <add|remove|rename|enable|disable> <target>'],
+        ['/send',         '/send <message> <target> (target: all, 1, or chat_id)'],
+        ['/model',        'Manage global AI responses (on, off) or models (list, use)'],
+        ['/personality',  '/personality <list|use|default> <target>'],
+        ['/internet',     '/internet <off|auto|on|status> <target>'],
+        ['/humane',       '/humane <off|on|status> <target>'],
         ['/status',       'Connection & runtime status dashboard'],
         ['/contacts',     'Show known contacts registry'],
-        ['/history [n]',  'Show last n message events (default 20)'],
+        ['/history [n]',  'Show last n message events'],
         ['/memory',       'Conversation memory info'],
         ['/quiet',        'Reduce output to messages + errors only'],
         ['/clear',        'Clear terminal screen'],
-        ['/about',        'Project & environment info'],
-        ['/devmode',      'Toggle Developer Mode (enable, disable)'],
+        ['/about',        'Project info'],
         ['/exit',         'Graceful shutdown'],
     ];
     if (_globalState.devmode) {
+        cmds.push(['/devmode', 'Toggle Developer Mode (enable, disable)']);
         cmds.push(['/ping', 'Health check all services (DEV)']);
         cmds.push(['/stats', 'Runtime statistics (DEV)']);
         cmds.push(['/verbose', 'Toggle verbose logging on/off (DEV)']);
@@ -712,6 +812,7 @@ function cmdHelp() {
     _div();
     _out('');
 }
+
 
 // ═══════════════════════════════════════════════════════════════════
 //  COMMAND DISPATCH
@@ -742,6 +843,7 @@ async function _dispatch(input) {
         case '/model':                  await cmdModel(args); break;
         case '/personality':            await cmdPersonality(args); break;
         case '/internet':               await cmdInternet(args); break;
+        case '/humane':                 await cmdHumane(args); break;
         case '/contacts':               cmdContacts(); break;
         case '/history':                cmdHistory(parseInt(args[0]) || 20); break;
         case '/memory':                 cmdMemory(); break;

@@ -203,24 +203,25 @@ function enqueueChatTask(chatId, taskFn) {
 const _repliedIds = new Set();
 
 /**
- * Handle an incoming WhatsApp message.
+ * Handle incoming WhatsApp message(s).
+ * `input` can be a single message object or an array of message objects.
  * Returns the reply string, or null if we chose not to reply.
  */
-async function handleMessage(message) {
-    // Ignore own messages
-    if (message.fromMe) return null;
+async function handleMessage(input) {
+    const isArray = Array.isArray(input);
+    const messages = isArray ? input : [input];
+    if (messages.length === 0) return null;
 
-    const msgId  = message.id?.id || '';
-    const from   = message.from   || '';
-    const author = message.author || '';  // populated for group messages
-    const body   = (message.body  || '').trim();
-    const senderName = message._data?.notifyName || '';  // sender's WhatsApp display name
+    const primary = messages[messages.length - 1]; // Use the last one for context
+    
+    // Ignore own messages
+    if (primary.fromMe) return null;
+
+    const from   = primary.from   || '';
+    const author = primary.author || '';  // populated for group messages
+    const senderName = primary._data?.notifyName || '';  // sender's WhatsApp display name
 
     // ── Chat filter ──────────────────────────────────────────────
-    // For groups:  message.from = group JID,  message.author = sender JID
-    // For DMs:     message.from = sender JID, message.author = ''
-    //
-    // We want to reply only when the CHAT (from) is in TARGET_CHAT_IDS.
     if (!isTargetChat(from)) {
         cli.skip(`${from} — not a target chat`);
         return null;
@@ -236,12 +237,16 @@ async function handleMessage(message) {
         return null;
     }
 
-    // Duplicate guard (in-process)
-    if (msgId && _repliedIds.has(msgId)) {
-        cli.skipDup(`duplicate message id: ${msgId}`);
+    // Duplicate guard for ALL messages
+    const msgIds = messages.map(m => m.id?.id).filter(Boolean);
+    if (msgIds.some(id => _repliedIds.has(id))) {
+        cli.skipDup(`duplicate message id found in grouped turn`);
         return null;
     }
 
+    // Merge bodies
+    const body = messages.map(m => (m.body || '').trim()).filter(Boolean).join('\n');
+    
     // Ignore empty messages (stickers, voice notes, etc.)
     if (!body) {
         cli.skip(`empty/media message from ${from}`);
@@ -250,25 +255,29 @@ async function handleMessage(message) {
 
     // Log the incoming message
     const displayLabel = senderName || author || from;
-    cli.message(displayLabel, from, body);
+    cli.message(displayLabel, from, body.replace(/\n/g, '\\n'));
 
     // ── WhatsApp Commands ─────────────────────────────────────────
     if (body.startsWith('/personality ')) {
         const parts = body.split(/\s+/);
         const sub = (parts[1] || '').toLowerCase();
         if (sub === 'use' && parts[2]) {
+            if (parts.length > 3) {
+                primary.reply('✗ Usage in WhatsApp: /personality use <name>\n(No target index needed in chat)');
+                return null;
+            }
             const pName = parts[2];
             try {
                 const res = await httpPost(`${BRIDGE_URL}/personality/use`, { chat_id: from, personality: pName });
                 if (res.status === 200 && res.body.ok) {
-                    message.reply(`✓ Personality for this chat set to: ${pName}`);
+                    primary.reply(`✓ Personality for this chat set to: ${pName}`);
                     cli.reply(`Personality switched to ${pName}`, 'System');
                 } else {
-                    message.reply(`✗ Error: ${res.body.error}`);
+                    primary.reply(`✗ Error: ${res.body.error}`);
                     cli.error(`Failed to switch personality: ${res.body.error}`);
                 }
             } catch (e) {
-                message.reply(`✗ Bridge error: ${e.message}`);
+                primary.reply(`✗ Bridge error: ${e.message}`);
                 cli.error(`Bridge error: ${e.message}`);
             }
             return null; // Stop processing this message as a normal chat
@@ -280,38 +289,75 @@ async function handleMessage(message) {
         const parts = body.split(/\s+/);
         const sub = (parts[1] || '').toLowerCase();
         if (sub === 'off' || sub === 'auto' || sub === 'on') {
+            if (parts.length > 2) {
+                primary.reply('✗ Usage in WhatsApp: /internet <off|auto|on>\n(No target index needed in chat)');
+                return null;
+            }
             try {
                 const res = await httpPost(`${BRIDGE_URL}/internet/set`, { chat_id: from, mode: sub });
                 if (res.status === 200 && res.body.ok) {
-                    message.reply(`✓ Internet mode set to: ${sub.toUpperCase()}`);
+                    primary.reply(`✓ Internet mode set to: ${sub.toUpperCase()}`);
                     cli.reply(`Internet mode → ${sub.toUpperCase()}`, 'System');
                 } else {
-                    message.reply(`✗ Error: ${res.body.error}`);
+                    primary.reply(`✗ Error: ${res.body.error}`);
                 }
             } catch (e) {
-                message.reply(`✗ Bridge error: ${e.message}`);
+                primary.reply(`✗ Bridge error: ${e.message}`);
             }
             return null;
         } else if (sub === 'status') {
+            if (parts.length > 2) {
+                primary.reply('✗ Usage in WhatsApp: /' + parts[0].replace('/','') + ' status\n(No target index needed in chat)');
+                return null;
+            }
             try {
                 const res = await httpPost(`${BRIDGE_URL}/internet/status`, { chat_id: from });
                 if (res.status === 200 && res.body.ok) {
                     const b = res.body;
                     const statusMsg = `🌐 Internet Access\nMode: ${b.mode}\nConnection: ${b.connection}\nWeb tools: ${b.web_tools}`;
-                    message.reply(statusMsg);
+                    primary.reply(statusMsg);
                     cli.reply(`Internet status reported`, 'System');
                 } else {
-                    message.reply(`✗ Error fetching internet status`);
+                    primary.reply(`✗ Error fetching internet status`);
                 }
             } catch (e) {
-                message.reply(`✗ Bridge error: ${e.message}`);
+                primary.reply(`✗ Bridge error: ${e.message}`);
             }
             return null;
         } else if (sub) {
-            message.reply(`✗ Unknown internet mode. Use: /internet off | auto | on | status`);
+            primary.reply(`✗ Unknown internet mode. Use: /internet off | auto | on | status`);
             return null;
         }
     }
+
+    // ── /humane command (WhatsApp) ─────────────────────────────
+    if (body.startsWith('/humane ') || body === '/humane') {
+        const parts = body.split(/\s+/);
+        const sub = (parts[1] || '').toLowerCase();
+        if (sub === 'on' || sub === 'off') {
+            if (parts.length > 2) {
+                primary.reply('✗ Usage in WhatsApp: /humane <off|on>\n(No target index needed in chat)');
+                return null;
+            }
+            humaneAccumulator.setHumaneMode(from, sub);
+            primary.reply(`✓ Humane mode set to: ${sub.toUpperCase()}`);
+            cli.reply(`Humane mode → ${sub.toUpperCase()}`, 'System');
+            return null;
+        } else if (sub === 'status') {
+            if (parts.length > 2) {
+                primary.reply('✗ Usage in WhatsApp: /' + parts[0].replace('/','') + ' status\n(No target index needed in chat)');
+                return null;
+            }
+            const mode = humaneAccumulator.getHumaneMode(from);
+            primary.reply(`🤖 Humane Mode\nMode: ${mode.toUpperCase()}`);
+            cli.reply(`Humane status reported`, 'System');
+            return null;
+        } else {
+            primary.reply(`✗ Unknown humane mode. Use: /humane off | on | status`);
+            return null;
+        }
+    }
+
     // ── Call bridge ──────────────────────────────────────────────
     let reply = null;
     let assistantName = 'AI';
@@ -347,17 +393,112 @@ async function handleMessage(message) {
         return null;
     }
 
-    // Mark as replied
-    if (msgId) _repliedIds.add(msgId);
+    // Mark all as replied
+    msgIds.forEach(id => {
+        _repliedIds.add(id);
+    });
+    
     // Keep set bounded
     if (_repliedIds.size > 500) {
-        const first = _repliedIds.values().next().value;
-        _repliedIds.delete(first);
+        // approximate deletion, just clear a bit
+        const arr = Array.from(_repliedIds).slice(_repliedIds.size - 400);
+        _repliedIds.clear();
+        arr.forEach(id => _repliedIds.add(id));
     }
 
     cli.reply(reply, assistantName);
     return reply;
 }
+
+// ── Humane Accumulator ────────────────────────────────────────────────
+class HumaneAccumulator {
+    constructor() {
+        this.pendingTurns = new Map();
+        this.humaneModes = new Map();
+    }
+
+    getTurnKey(chatId, senderId) {
+        return `${chatId}::${senderId}`;
+    }
+
+    isHumaneEnabled(chatId) {
+        return (this.humaneModes.get(chatId) !== 'off');
+    }
+
+    setHumaneMode(chatId, mode) {
+        this.humaneModes.set(chatId, mode);
+    }
+
+    getHumaneMode(chatId) {
+        return this.humaneModes.get(chatId) || 'on';
+    }
+
+    addMessage(message, processCallback) {
+        const chatId = message.from || '';
+        const senderId = message.author || message.from || '';
+        const text = (message.body || '').trim();
+
+        if (!this.isHumaneEnabled(chatId) || text.startsWith('/')) {
+            return processCallback([message]);
+        }
+
+        const turnKey = this.getTurnKey(chatId, senderId);
+        
+        let turn = this.pendingTurns.get(turnKey);
+        if (!turn) {
+            turn = {
+                messages: [],
+                timer: null,
+                processCallback
+            };
+            this.pendingTurns.set(turnKey, turn);
+        }
+
+        turn.messages.push(message);
+
+        if (turn.timer) {
+            clearTimeout(turn.timer);
+            turn.timer = null;
+        }
+
+        const waitTime = this.calculateAdaptiveWait(turn.messages);
+
+        turn.timer = setTimeout(() => {
+            this.commitTurn(turnKey);
+        }, waitTime);
+    }
+
+    calculateAdaptiveWait(messages) {
+        const lastMsg = (messages[messages.length - 1].body || '').trim();
+        const totalLength = messages.reduce((acc, m) => acc + (m.body || '').trim().length, 0);
+
+        if (lastMsg.length < 25 && !lastMsg.match(/[.!?]$/)) {
+            return 3000;
+        }
+
+        if (totalLength > 120 || lastMsg.match(/[.!?]$/)) {
+            return 1200;
+        }
+
+        return 2000;
+    }
+
+    commitTurn(turnKey) {
+        const turn = this.pendingTurns.get(turnKey);
+        if (!turn) return;
+
+        this.pendingTurns.delete(turnKey);
+
+        if (turn.timer) {
+            clearTimeout(turn.timer);
+            turn.timer = null;
+        }
+
+        turn.processCallback(turn.messages);
+    }
+}
+
+const humaneAccumulator = new HumaneAccumulator();
 
 // ── Bot lifecycle ─────────────────────────────────────────────────────
 let client = null;
@@ -398,17 +539,20 @@ function attachListeners(c) {
             return;
         }
         
-        const chatId = message.from || '';
-        enqueueChatTask(chatId, async () => {
-            if (isShuttingDown) return;
-            try {
-                const reply = await handleMessage(message);
-                if (reply && !isShuttingDown) {
-                    await message.reply(reply);
+        humaneAccumulator.addMessage(message, (groupedMessages) => {
+            const from = groupedMessages[groupedMessages.length - 1].from || '';
+            enqueueChatTask(from, async () => {
+                if (isShuttingDown) return;
+                try {
+                    const reply = await handleMessage(groupedMessages);
+                    if (reply && !isShuttingDown) {
+                        const lastMessage = groupedMessages[groupedMessages.length - 1];
+                        await lastMessage.reply(reply);
+                    }
+                } catch (err) {
+                    if (!isShuttingDown) cli.error(`Uncaught handle error: ${err.message}`, err.stack);
                 }
-            } catch (err) {
-                if (!isShuttingDown) cli.error(`Message_create handler error: ${err.message}`, err.stack);
-            }
+            });
         });
     });
 
@@ -544,6 +688,8 @@ function cleanStaleBrowser() {
         getClient: () => client,
         httpGet,
         httpPost,
+        setHumaneMode: (chatId, mode) => humaneAccumulator.setHumaneMode(chatId, mode),
+        getHumaneMode: (chatId) => humaneAccumulator.getHumaneMode(chatId),
         shutdown
     });
 
