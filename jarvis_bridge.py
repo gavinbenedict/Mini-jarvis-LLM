@@ -29,6 +29,7 @@ import logging
 import os
 import sys
 import time
+import urllib.request
 from datetime import datetime
 from threading import Lock
 
@@ -82,6 +83,7 @@ contacts: ContactsRegistry | None = None
 _chat_memory: dict[str, MemoryManager] = {}
 _chat_prefs: dict[str, PreferencesManager] = {}
 _chat_personality: dict[str, str] = {}
+_chat_internet: dict[str, str] = {}  # per-chat internet mode: "off" | "auto" | "on"
 _state_lock = Lock()
 
 # ── Duplicate message prevention ─────────────────────────────────────
@@ -253,6 +255,102 @@ def _is_duplicate(sender: str, text: str) -> bool:
     return False
 
 
+# ── Internet access utilities ────────────────────────────────────────
+
+def check_internet_connectivity() -> bool:
+    """Quick connectivity check. Returns True if the machine can reach the internet."""
+    try:
+        urllib.request.urlopen("https://www.google.com", timeout=3)
+        return True
+    except Exception:
+        return False
+
+def _generate_search_query(text: str, mode: str) -> str:
+    """Use Ollama to determine if a web search is needed, and generate the query."""
+    now = datetime.now().strftime("%B %Y")
+    sys_prompt = f"""You are a search query generator. The current date is {now}.
+Your ONLY job is to output a web search query IF the user's message requires fetching external information.
+If the message does NOT require fetching external information, output EXACTLY the word "NO_SEARCH".
+
+Rules for deciding to search:
+1. "AUTO" mode: Search ONLY for current events, latest news, live data, or very recent facts (e.g., "What happened in Nepal?", "latest news", "stock price").
+2. "ON" mode: Search for current events AND specific factual lookups where web data helps.
+3. DO NOT search for general knowledge, coding help, explanations, casual chat, or definitions (e.g., "Explain recursion", "Hi", "What is a linked list?").
+
+Current Mode: {mode.upper()}
+
+Reply ONLY with the raw search query (no quotes, no prefix like "Search for"). If no search is needed, output exactly NO_SEARCH."""
+    
+    payload = {
+        "model": _current_model,
+        "messages": [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": text}
+        ],
+        "stream": False
+    }
+    
+    try:
+        resp = requests.post(f"{OLLAMA_API_URL}/api/chat", json=payload, timeout=20)
+        resp.raise_for_status()
+        reply = resp.json().get("message", {}).get("content", "").strip()
+        
+        # Cleanup potential extra quotes or prefixes
+        lower_reply = reply.lower()
+        if lower_reply.startswith("no_search") or lower_reply.startswith('"no_search"'):
+            return ""
+            
+        if reply.startswith('"') and reply.endswith('"'):
+            reply = reply[1:-1]
+        elif reply.startswith("'") and reply.endswith("'"):
+            reply = reply[1:-1]
+            
+        return reply
+    except Exception as exc:
+        log.warning("Failed to generate search query via LLM: %s", exc)
+        return ""
+
+
+def web_search(query: str, num_results: int = 3) -> str:
+    """
+    Perform a web search using DuckDuckGo HTML (no API key required).
+    Returns a text summary of top results, or an error message.
+    """
+    try:
+        import re as _re
+        import urllib.parse
+        data = urllib.parse.urlencode({"q": query}).encode()
+        url = "https://html.duckduckgo.com/html/"
+        req = urllib.request.Request(url, data=data, headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+        })
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+
+        # Extract result snippets and titles from DuckDuckGo HTML response
+        results = []
+        snippets = _re.findall(r'result__snippet[^>]*>(.*?)</', html, _re.DOTALL)
+        titles = _re.findall(r'result__a[^>]*>(.*?)</a>', html, _re.DOTALL)
+
+        for i in range(min(num_results, len(snippets))):
+            title = _re.sub(r'<[^>]+>', '', titles[i]).strip() if i < len(titles) else ""
+            snippet = _re.sub(r'<[^>]+>', '', snippets[i]).strip()
+            if snippet:
+                results.append(f"{title}: {snippet}" if title else snippet)
+
+        if not results:
+            return f"Web search for '{query}' returned no usable results."
+
+        return "Web search results:\n" + "\n".join(f"- {r}" for r in results)
+
+    except urllib.error.URLError as exc:
+        log.warning("Web search failed (network): %s", exc)
+        return "Web search unavailable: network error."
+    except Exception as exc:
+        log.warning("Web search failed: %s", exc)
+        return f"Web search unavailable: {exc}"
+
+
 # ── Routes ───────────────────────────────────────────────────────────
 
 
@@ -385,6 +483,49 @@ def chat():
     # Build context window for Ollama
     context_messages = mem.get_context_messages()
 
+    # ── Internet access integration ──────────────────────────────
+    with _state_lock:
+        internet_mode = _chat_internet.get(chat_id, "auto")
+
+    web_context = None
+    search_error = None
+    if internet_mode != "off":
+        query = _generate_search_query(text, internet_mode)
+        if query:
+            is_online = check_internet_connectivity()
+            if is_online:
+                log.info("🌐 Internet: searching for query '%s'", query[:60])
+                web_context = web_search(query)
+                if web_context and "unavailable" not in web_context.lower() and "returned no usable results" not in web_context.lower():
+                    log.info("🌐 Internet: search results obtained")
+                else:
+                    log.info("🌐 Internet: search returned no useful results")
+                    search_error = "Web search returned no useful results."
+                    web_context = None
+            else:
+                log.info("🌐 Internet: mode=%s but offline — local fallback", internet_mode)
+                search_error = "Internet connection offline. Could not verify current information."
+
+    if web_context:
+        now_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        system_prompt += (
+            "\n\nCURRENT WEB INFORMATION\n"
+            "=======================\n"
+            f"Search results retrieved at {now_time}:\n\n"
+            f"{web_context}\n\n"
+            "IMPORTANT:\n"
+            "These are current external search results. Prefer them over older "
+            "conversation knowledge when answering questions about current or "
+            "recent events."
+        )
+    elif search_error:
+        system_prompt += (
+            "\n\nIMPORTANT LIMITATION:\n"
+            f"{search_error}\n"
+            "You cannot reliably verify what happened recently. "
+            "Explicitly inform the user of this limitation if they are asking about current events."
+        )
+
     # Call Ollama
     try:
         reply = call_ollama(system_prompt, context_messages)
@@ -444,6 +585,35 @@ def handle_personality_use():
             _chat_memory[chat_id] = MemoryManager()
     
     return jsonify({"ok": True})
+
+@app.route("/internet/set", methods=["POST"])
+def handle_internet_set():
+    """Set internet mode for a specific chat."""
+    data = request.json or {}
+    chat_id = data.get("chat_id")
+    mode = (data.get("mode") or "").lower()
+    if not chat_id or mode not in ("off", "auto", "on"):
+        return jsonify({"error": "missing chat_id or invalid mode (off/auto/on)"}), 400
+    with _state_lock:
+        _chat_internet[chat_id] = mode
+    log.info("🌐 Internet mode for %s set to: %s", chat_id[:20], mode)
+    return jsonify({"ok": True, "mode": mode})
+
+@app.route("/internet/status", methods=["POST"])
+def handle_internet_status():
+    """Report internet mode and connectivity for a specific chat."""
+    data = request.json or {}
+    chat_id = data.get("chat_id", "")
+    with _state_lock:
+        mode = _chat_internet.get(chat_id, "auto")
+    is_online = check_internet_connectivity()
+    web_available = (mode != "off") and is_online
+    return jsonify({
+        "ok": True,
+        "mode": mode.upper(),
+        "connection": "ONLINE" if is_online else "OFFLINE",
+        "web_tools": "AVAILABLE" if web_available else ("DISABLED" if mode == "off" else "UNAVAILABLE"),
+    })
 
 def init():
     """Initialize the bridge. Called once before serving."""

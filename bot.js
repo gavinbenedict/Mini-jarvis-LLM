@@ -275,6 +275,43 @@ async function handleMessage(message) {
         }
     }
 
+    // ── /internet command (WhatsApp) ─────────────────────────────
+    if (body.startsWith('/internet ') || body === '/internet') {
+        const parts = body.split(/\s+/);
+        const sub = (parts[1] || '').toLowerCase();
+        if (sub === 'off' || sub === 'auto' || sub === 'on') {
+            try {
+                const res = await httpPost(`${BRIDGE_URL}/internet/set`, { chat_id: from, mode: sub });
+                if (res.status === 200 && res.body.ok) {
+                    message.reply(`✓ Internet mode set to: ${sub.toUpperCase()}`);
+                    cli.reply(`Internet mode → ${sub.toUpperCase()}`, 'System');
+                } else {
+                    message.reply(`✗ Error: ${res.body.error}`);
+                }
+            } catch (e) {
+                message.reply(`✗ Bridge error: ${e.message}`);
+            }
+            return null;
+        } else if (sub === 'status') {
+            try {
+                const res = await httpPost(`${BRIDGE_URL}/internet/status`, { chat_id: from });
+                if (res.status === 200 && res.body.ok) {
+                    const b = res.body;
+                    const statusMsg = `🌐 Internet Access\nMode: ${b.mode}\nConnection: ${b.connection}\nWeb tools: ${b.web_tools}`;
+                    message.reply(statusMsg);
+                    cli.reply(`Internet status reported`, 'System');
+                } else {
+                    message.reply(`✗ Error fetching internet status`);
+                }
+            } catch (e) {
+                message.reply(`✗ Bridge error: ${e.message}`);
+            }
+            return null;
+        } else if (sub) {
+            message.reply(`✗ Unknown internet mode. Use: /internet off | auto | on | status`);
+            return null;
+        }
+    }
     // ── Call bridge ──────────────────────────────────────────────
     let reply = null;
     let assistantName = 'AI';

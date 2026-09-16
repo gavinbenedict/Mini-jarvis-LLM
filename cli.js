@@ -550,6 +550,64 @@ async function cmdPersonality(args) {
     }
 }
 
+async function cmdInternet(args) {
+    if (args.length === 0) {
+        _out(chalk.dim(`  Usage: /internet <off|auto|on|status> <target_index>`));
+        return;
+    }
+    const sub = args[0].toLowerCase();
+    
+    if (sub === 'off' || sub === 'auto' || sub === 'on') {
+        if (args.length < 2) return _out(chalk.dim("  Usage: /internet <off|auto|on> <target_index>"));
+        const idx = parseInt(args[1], 10);
+        if (isNaN(idx) || idx < 1 || idx > _rt.targetChatIds.length) return _out(chalk.red(`  Invalid target number: ${args[1]}`));
+        const chat_id = _rt.targetChatIds[idx - 1];
+        try {
+            if (_rt.httpPost) {
+                const res = await _rt.httpPost(`${_rt.bridgeUrl}/internet/set`, { chat_id, mode: sub });
+                if (res.status === 200 && res.body.ok) {
+                    const names = loadTargetNames();
+                    const name = names[chat_id]?.name || chat_id;
+                    _out(chalk.green(`  ✓ Internet mode for target ${idx} (${name}) set to: ${sub.toUpperCase()}`));
+                } else {
+                    _out(chalk.red(`  Failed: ${res.body.error || 'Unknown error'}`));
+                }
+            }
+        } catch (err) {
+            _out(chalk.red(`  Bridge error: ${err.message}`));
+        }
+    }
+    else if (sub === 'status') {
+        const idx = parseInt(args[1], 10);
+        let chat_id = '';
+        if (!isNaN(idx) && idx >= 1 && idx <= _rt.targetChatIds.length) {
+            chat_id = _rt.targetChatIds[idx - 1];
+        }
+        try {
+            if (_rt.httpPost) {
+                const res = await _rt.httpPost(`${_rt.bridgeUrl}/internet/status`, { chat_id });
+                if (res.status === 200 && res.body.ok) {
+                    const b = res.body;
+                    _out('');
+                    _div('INTERNET ACCESS');
+                    _out(`  Mode:        ${b.mode}`);
+                    _out(`  Connection:  ${b.connection}`);
+                    _out(`  Web tools:   ${b.web_tools}`);
+                    _div();
+                    _out('');
+                } else {
+                    _out(chalk.red(`  Failed to get internet status`));
+                }
+            }
+        } catch (err) {
+            _out(chalk.red(`  Bridge error: ${err.message}`));
+        }
+    }
+    else {
+        _out(chalk.dim(`  Usage: /internet <off|auto|on|status> [target_index]`));
+    }
+}
+
 function cmdContacts() {
     let contacts = {};
     try { contacts = JSON.parse(fs.readFileSync(CONTACTS_FILE, 'utf8')); } catch { return _out('No contacts file.'); }
@@ -634,6 +692,7 @@ function cmdHelp() {
         ['/send',         'Manual send (e.g. /send all Hello, /send 1,3 Test)'],
         ['/model',        'Manage global AI responses (on, off) or Ollama models (list, use)'],
         ['/personality',  'Manage personality (list, use, default, create)'],
+        ['/internet',     'Internet access mode (off, auto, on, status)'],
         ['/status',       'Connection & runtime status dashboard'],
         ['/contacts',     'Show known contacts registry'],
         ['/history [n]',  'Show last n message events (default 20)'],
@@ -682,6 +741,7 @@ async function _dispatch(input) {
         case '/send':                   await cmdSend(args); break;
         case '/model':                  await cmdModel(args); break;
         case '/personality':            await cmdPersonality(args); break;
+        case '/internet':               await cmdInternet(args); break;
         case '/contacts':               cmdContacts(); break;
         case '/history':                cmdHistory(parseInt(args[0]) || 20); break;
         case '/memory':                 cmdMemory(); break;
